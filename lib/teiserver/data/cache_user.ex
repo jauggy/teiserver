@@ -567,6 +567,7 @@ defmodule Teiserver.CacheUser do
   def send_direct_message(from_id, to_id, "!joinas" <> s),
     do: send_direct_message(from_id, to_id, "!cv joinas" <> s)
 
+  @spec send_direct_message(T.userid(), T.userid(), list) :: :ok
   def send_direct_message(sender_id, to_id, message_parts) when is_list(message_parts) do
     sender = get_user_by_id(sender_id)
     msg_str = Enum.join(message_parts, "\n")
