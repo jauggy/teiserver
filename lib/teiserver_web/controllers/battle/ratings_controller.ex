@@ -1,6 +1,6 @@
 defmodule TeiserverWeb.Battle.RatingsController do
   use TeiserverWeb, :controller
-
+  alias Teiserver.Account.LeaderboardReport
   alias Teiserver.{Account}
   alias Teiserver.Game.MatchRatingLib
 
@@ -18,10 +18,7 @@ defmodule TeiserverWeb.Battle.RatingsController do
 
   @spec leaderboard(Plug.Conn.t(), Map.t()) :: Plug.Conn.t()
   def leaderboard(conn, params) do
-    activity_time =
-      Timex.today()
-      |> Timex.shift(days: -35)
-      |> Timex.to_datetime()
+    activity_time =LeaderboardReport.get_min_activity_date()
 
     type_name = params["type"]
 

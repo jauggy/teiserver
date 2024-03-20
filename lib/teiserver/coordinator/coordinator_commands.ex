@@ -5,9 +5,12 @@ defmodule Teiserver.Coordinator.CoordinatorCommands do
   alias Teiserver.Account.{AccoladeLib, CodeOfConductData}
   alias Teiserver.Coordinator.CoordinatorLib
   alias Teiserver.Config
+  alias Teiserver.Game.MatchRatingLib
+  alias Teiserver.Account.LeaderboardReport
+  require Logger
 
   @splitter "---------------------------"
-  @always_allow ~w(help whoami whois discord coc ignore mute ignore unmute unignore matchmaking website party)
+  @always_allow ~w(duelstats ffastats teamstats help whoami whois discord coc ignore mute ignore unmute unignore matchmaking website party)
   @forward_to_consul ~w(s status players follow joinq leaveq splitlobby y yes n no explain)
 
   @spec allow_command?(Map.t(), Map.t()) :: boolean()
@@ -199,6 +202,30 @@ defmodule Teiserver.Coordinator.CoordinatorCommands do
       |> Enum.reject(fn l -> l == nil end)
 
     CacheUser.send_direct_message(state.userid, senderid, msg)
+    state
+  end
+
+
+
+  defp do_handle(%{command: "teamstats", senderid: senderid, remaining: remaining} = _cmd, state) do
+    username = remaining
+
+    send_stats_messages(username, "Team", senderid, state)
+
+    state
+  end
+  defp do_handle(%{command: "ffastats", senderid: senderid, remaining: remaining} = _cmd, state) do
+    username = remaining
+
+    send_stats_messages(username, "FFA", senderid, state)
+
+    state
+  end
+  defp do_handle(%{command: "duelstats", senderid: senderid, remaining: remaining} = _cmd, state) do
+    username = remaining
+
+    send_stats_messages(username, "Duel", senderid, state)
+
     state
   end
 
@@ -556,4 +583,85 @@ defmodule Teiserver.Coordinator.CoordinatorCommands do
   end
 
   defp say_command(_), do: :ok
+
+  defp get_percentile(rank, number_of_data_points) do
+    percentile = (rank / number_of_data_points) * 100
+    case percentile < 1 do
+      true ->
+        percentile |> Decimal.from_float() |> Decimal.round(2)
+      false ->
+        percentile |> Decimal.from_float() |> Decimal.round(0)
+    end
+  end
+
+  defp send_stats_messages(username_input, rating_type, senderid, state) do
+    user = cond do
+      username_input == nil || username_input == "" -> CacheUser.get_user_by_id(senderid)
+      true  -> CacheUser.get_user_by_name(username_input)
+    end
+
+    case user do
+      nil ->
+        CacheUser.send_direct_message(
+          state.userid,
+          senderid,
+          "Unable to find a user with that name"
+        )
+
+      _ ->
+        activity_time = LeaderboardReport.get_min_activity_date()
+
+        user_id = user.id
+        username = user.name
+        rating_type_id = MatchRatingLib.rating_type_name_lookup()[rating_type]
+
+        ratings =
+          Account.list_ratings(
+            search: [
+              rating_type_id: rating_type_id,
+              updated_after: activity_time
+            ],
+            order_by: "Leaderboard rating high to low"
+          )
+
+        # Find the user in the rankings
+        result =
+          Enum.reduce_while(ratings, {:not_found, 0}, fn el, {:not_found, index} ->
+            if el.user_id == user_id,
+              do: {:halt, {:found, index, el}},
+              else: {:cont, {:not_found, index + 1}}
+          end)
+
+        case result do
+          {:found, index, x} ->
+            rank = index + 1
+            datapoints = length(ratings)
+
+            percentile =get_percentile(rank, datapoints)
+
+            leaderboard_rating = x.leaderboard_rating |> Decimal.from_float() |> Decimal.round(2)
+            os = x.rating_value |> Decimal.from_float() |> Decimal.round(2)
+
+            msgs = [
+              @splitter,
+              "#{rating_type} Stats",
+              "#{username}",
+              @splitter,
+              "OS: #{os}",
+              "Leaderboard Rank: #{rank} => Top #{percentile}%",
+              "Leaderboard Rating: #{leaderboard_rating}",
+              "",
+              "Go here to learn more about Leaderboard Rating:",
+              "https://www.beyondallreason.info/guide/rating-and-lobby-balance#leaderboard-rating"
+            ]
+
+            CacheUser.send_direct_message(state.userid, senderid, msgs)
+
+          _ ->
+            msg = "#{username} doesn't have a recent #{rating_type} Rating"
+            CacheUser.send_direct_message(state.userid, senderid, msg)
+        end
+    end
+
+  end
 end
