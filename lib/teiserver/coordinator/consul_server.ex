@@ -25,9 +25,6 @@ defmodule Teiserver.Coordinator.ConsulServer do
   alias Teiserver.Data.Types, as: T
   alias Teiserver.Coordinator.{ConsulCommands, CoordinatorLib, SpadsParser}
 
-  # Commands that are always forwarded to the coordinator itself, not the consul server
-  @coordinator_bot ~w(duelstats ffastats teamstats whoami whois check discord help coc ignore mute ignore unmute unignore matchmaking website party modparty unparty)
-
   @always_allow ~w(status s y n follow joinq leaveq splitlobby afks roll players password? newlobby jazlobby tournament)
   @boss_commands ~w(balancemode gatekeeper welcome-message meme reset-approval rename resetratinglevels minratinglevel maxratinglevel setratinglevels)
   @vip_boss_commands ~w(shuffle)
@@ -351,7 +348,7 @@ defmodule Teiserver.Coordinator.ConsulServer do
 
   def handle_info(%{command: command} = cmd, state) do
     cond do
-      Enum.member?(@coordinator_bot, command) ->
+      Coordinator.is_coordinator_command?() ->
         Coordinator.cast_coordinator(
           {:consul_command, Map.merge(cmd, %{lobby_id: state.lobby_id, host_id: state.host_id})}
         )
