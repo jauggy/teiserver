@@ -5,7 +5,7 @@ defmodule Teiserver.Battle.LobbyServer do
   alias Teiserver.{Account, Battle, Config, Telemetry, Coordinator, Communication}
   alias Teiserver.Lobby.CommandLib
   alias Phoenix.PubSub
-
+  alias Teiserver.Coordinator.ConsulCommands
   @player_list_cache_age_max 200
 
   # List of keys that can be broadcast when updated
@@ -544,7 +544,7 @@ defmodule Teiserver.Battle.LobbyServer do
     parts =
       [
         "",
-
+        ConsulCommands.get_rank_policy_as_text(consul_state),
         # Rating stuff here
         cond do
           consul_state == nil ->

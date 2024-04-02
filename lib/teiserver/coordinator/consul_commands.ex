@@ -22,6 +22,8 @@ defmodule Teiserver.Coordinator.ConsulCommands do
   @split_delay 60_000
   @spec handle_command(Map.t(), Map.t()) :: Map.t()
   @default_ban_reason "Banned"
+  #If max rank set to this value, there will be no max rank requirements
+  @rank_upper_bound 1000
 
   #################### For everybody
   def handle_command(%{command: "s"} = cmd, state),
@@ -122,17 +124,19 @@ defmodule Teiserver.Coordinator.ConsulCommands do
 
     min_rank_play = state.minimum_rank_to_play
     max_rank_play = state.maximum_rank_to_play
+    min_chev = min_rank_play + 1
+    max_chev = max_rank_play + 1
 
     play_rank_bounds =
       cond do
-        min_rank_play > 0 and max_rank_play < 1000 ->
-          "Play rank boundaries set to min: #{min_rank_play}, max: #{max_rank_play}"
+        min_rank_play > 0 and max_rank_play < @rank_upper_bound ->
+          "Chev boundaries set to min: #{min_chev}, max: #{max_chev}"
 
         min_rank_play > 0 ->
-          "Play rank boundaries set to min: #{min_rank_play}"
+          "Chev boundaries set to min: #{min_chev}"
 
-        max_rank_play < 1000 ->
-          "Play rank boundaries set to max: #{max_rank_play}"
+        max_rank_play < @rank_upper_bound ->
+          "Chev boundaries set to max: #{max_chev}"
 
         true ->
           nil
@@ -757,7 +761,103 @@ defmodule Teiserver.Coordinator.ConsulCommands do
   def handle_command(%{command: "resetratinglevels", remaining: ""} = cmd, state) do
     ConsulServer.say_command(cmd, state)
     LobbyLib.cast_lobby(state.lobby_id, :refresh_name)
-    %{state | minimum_rating_to_play: 0, maximum_rating_to_play: 1000}
+    %{state | minimum_rank_to_play: 0, maximum_rank_to_play: 1000}
+  end
+
+  @doc"""
+  Reset min chev level for a lobby
+  """
+  def handle_command(%{command: "minchevlevel", remaining: ""} = cmd, state) do
+    ConsulServer.say_command(cmd, state)
+    LobbyLib.cast_lobby(state.lobby_id, :refresh_name)
+    %{state | minimum_rank_to_play: 0}
+  end
+
+  @doc"""
+  Set min chev level for a lobby
+  """
+  def handle_command(
+        %{command: "minchevlevel", remaining: remaining, senderid: senderid} = cmd,
+        state
+      ) do
+
+    if allowed_to_set_rating_limit?(state) do
+      case Integer.parse(remaining |> String.trim()) do
+        :error ->
+          Lobby.sayprivateex(
+            state.coordinator_id,
+            senderid,
+            [
+              "Unable to turn '#{remaining}' into an integer"
+            ],
+            state.lobby_id
+          )
+
+          state
+
+        {chev_level, _} ->
+          ConsulServer.say_command(cmd, state)
+          LobbyLib.cast_lobby(state.lobby_id, :refresh_name)
+          level = chev_level - 1
+          %{
+            state
+            | minimum_rank_to_play: level |> max(0) |> min(state.maximum_rank_to_play - 1)
+          }
+      end
+    else
+      Lobby.sayex(
+        state.coordinator_id,
+        "You cannot set a rating limit if all are welcome to the game",
+        state.lobby_id
+      )
+
+      state
+    end
+  end
+
+  @doc"""
+  Reset max chev level for a lobby
+  """
+  def handle_command(%{command: "maxchevlevel", remaining: ""} = cmd, state) do
+    ConsulServer.say_command(cmd, state)
+    LobbyLib.cast_lobby(state.lobby_id, :refresh_name)
+    %{state | maximum_rank_to_play: @rank_upper_bound}
+  end
+
+  def handle_command(
+        %{command: "maxchevlevel", remaining: remaining, senderid: senderid} = cmd,
+        state
+      ) do
+    if allowed_to_set_rating_limit?(state) do
+      case Integer.parse(remaining |> String.trim()) do
+        :error ->
+          Lobby.sayprivateex(
+            state.coordinator_id,
+            senderid,
+            [
+              "Unable to turn '#{remaining}' into an integer"
+            ],
+            state.lobby_id
+          )
+
+          state
+
+          {chev_level, _} ->
+            ConsulServer.say_command(cmd, state)
+            LobbyLib.cast_lobby(state.lobby_id, :refresh_name)
+            level = chev_level - 1
+            %{state | maximum_rank_to_play: level |> min(@rank_upper_bound) |> max(state.minimum_rank_to_play + 1)}
+
+      end
+    else
+      Lobby.sayex(
+        state.coordinator_id,
+        "You cannot set a rating limit if all are welcome to the game",
+        state.lobby_id
+      )
+
+      state
+    end
   end
 
   def handle_command(%{command: "minratinglevel", remaining: ""} = cmd, state) do
@@ -2060,4 +2160,35 @@ defmodule Teiserver.Coordinator.ConsulCommands do
 
   @spec get_queue(map()) :: [T.userid()]
   defdelegate get_queue(state), to: ConsulServer
+
+  def get_rank_policy_as_text(consul_state) do
+     # Chevlevel stuff here
+     cond do
+      consul_state == nil ->
+        nil
+
+      # Default chev levels
+      consul_state.maximum_rank_to_play >= @rank_upper_bound &&
+          consul_state.minimum_rank_to_play <= 0 ->
+        nil
+
+      # Just a max rating
+      consul_state.maximum_rank_to_play < @rank_upper_bound &&
+          consul_state.minimum_rank_to_play <= 0 ->
+        "Max chev: #{consul_state.maximum_rank_to_play + 1}"
+
+      # Just a min rating
+      consul_state.maximum_rank_to_play >= @rank_upper_bound &&
+          consul_state.minimum_rank_to_play > 0 ->
+        "Min chev: #{consul_state.minimum_rank_to_play + 1}"
+
+      # Rating range
+      consul_state.maximum_rank_to_play < @rank_upper_bound ||
+          consul_state.minimum_rank_to_play > 0 ->
+        "Chev between: #{consul_state.minimum_rank_to_play + 1} - #{consul_state.maximum_rank_to_play + 1}"
+
+      true ->
+        nil
+    end
+  end
 end
