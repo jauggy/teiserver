@@ -17,13 +17,12 @@ defmodule Teiserver.Coordinator.ConsulServer do
     Config,
     Communication
   }
-
   alias Teiserver.Lobby.{ChatLib}
   import Teiserver.Helper.NumberHelper, only: [int_parse: 1]
   alias Phoenix.PubSub
   alias Teiserver.Battle.BalanceLib
   alias Teiserver.Data.Types, as: T
-  alias Teiserver.Coordinator.{ConsulCommands, CoordinatorLib, SpadsParser}
+  alias Teiserver.Coordinator.{ConsulCommands, CoordinatorLib, SpadsParser, CoordinatorCommands}
 
   @always_allow ~w(status s y n follow joinq leaveq splitlobby afks roll players password? newlobby jazlobby tournament)
   @boss_commands ~w(balancemode gatekeeper welcome-message meme reset-approval rename resetratinglevels minratinglevel maxratinglevel setratinglevels)
@@ -348,7 +347,7 @@ defmodule Teiserver.Coordinator.ConsulServer do
 
   def handle_info(%{command: command} = cmd, state) do
     cond do
-      Coordinator.is_coordinator_command?() ->
+      CoordinatorCommands.is_coordinator_command?(command) ->
         Coordinator.cast_coordinator(
           {:consul_command, Map.merge(cmd, %{lobby_id: state.lobby_id, host_id: state.host_id})}
         )
