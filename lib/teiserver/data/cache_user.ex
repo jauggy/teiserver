@@ -1259,6 +1259,12 @@ defmodule Teiserver.CacheUser do
   def is_moderator?(%{roles: roles}), do: Enum.member?(roles, "Moderator")
   def is_moderator?(_), do: false
 
+  @spec is_contributor?(T.userid() | T.user()) :: boolean()
+  def is_contributor?(nil), do: true
+  def is_contributor?(userid) when is_integer(userid), do: is_contributor?(get_user_by_id(userid))
+  def is_contributor?(%{roles: roles}), do: Enum.member?(roles, "Contributor")
+  def is_contributor?(_), do: false
+
   @spec is_verified?(T.userid() | T.user()) :: boolean()
   def is_verified?(nil), do: true
   def is_verified?(userid) when is_integer(userid), do: is_verified?(get_user_by_id(userid))

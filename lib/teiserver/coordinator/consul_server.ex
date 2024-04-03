@@ -18,7 +18,7 @@ defmodule Teiserver.Coordinator.ConsulServer do
     Communication
   }
 
-  alias Teiserver.Lobby.{ChatLib}
+  alias Teiserver.Lobby.{ChatLib, LobbyPolicy}
   import Teiserver.Helper.NumberHelper, only: [int_parse: 1]
   alias Phoenix.PubSub
   alias Teiserver.Battle.BalanceLib
@@ -26,7 +26,7 @@ defmodule Teiserver.Coordinator.ConsulServer do
   alias Teiserver.Coordinator.{ConsulCommands, CoordinatorLib, SpadsParser, CoordinatorCommands}
 
   @always_allow ~w(status s y n follow joinq leaveq splitlobby afks roll players password? newlobby jazlobby tournament)
-  @boss_commands ~w(balancemode gatekeeper welcome-message meme reset-approval rename minchevlevel maxchevlevel resetratinglevels minratinglevel maxratinglevel setratinglevels)
+  @boss_commands ~w(balancemode gatekeeper welcome-message meme reset-approval rename minchevlevel maxchevlevel resetchevlevels resetratinglevels minratinglevel maxratinglevel setratinglevels)
   @vip_boss_commands ~w(shuffle)
   @host_commands ~w(specunready makeready settag speclock forceplay lobbyban lobbybanmult unban forcespec forceplay lock unlock makebalance)
 
@@ -372,6 +372,9 @@ defmodule Teiserver.Coordinator.ConsulServer do
     {:noreply, state}
   end
 
+  @doc """
+  Update lobby state when everyone leaves
+  """
   def handle_info(
         %{channel: "teiserver_lobby_updates", event: :remove_user, client: _client},
         state
@@ -379,7 +382,19 @@ defmodule Teiserver.Coordinator.ConsulServer do
     new_player_count = get_player_count(state)
 
     if new_player_count == 0 do
-      new_state = %{state | minimum_rating_to_play: 0, maximum_rating_to_play: 1000}
+      new_state =
+        Map.merge(state, %{
+          minimum_rating_to_play: 0,
+          maximum_rating_to_play: LobbyPolicy.rating_upper_bound(),
+          minimum_rank_to_play: 0,
+          maximum_rank_to_play: LobbyPolicy.rank_upper_bound()
+        })
+
+      #Remove ratings from lobby name
+      lobby = Lobby.get_lobby(state.lobby_id)
+      old_name = lobby.name
+      new_name = String.split(old_name, "|", trim: true) |> Enum.at(0)
+      Battle.rename_lobby(state.lobby_id, new_name, nil)
 
       {:noreply, new_state}
     else
@@ -388,41 +403,8 @@ defmodule Teiserver.Coordinator.ConsulServer do
   end
 
   def handle_info(%{channel: "teiserver_lobby_updates", event: :add_user, client: client}, state) do
-    min_rate_play = state.minimum_rating_to_play
-    max_rate_play = state.maximum_rating_to_play
-
-    play_level_bounds =
-      cond do
-        min_rate_play > 0 and max_rate_play < 1000 ->
-          "Play rating boundaries set to min: #{min_rate_play}, max: #{max_rate_play}"
-
-        min_rate_play > 0 ->
-          "Play rating boundaries set to min: #{min_rate_play}"
-
-        max_rate_play < 1000 ->
-          "Play rating boundaries set to max: #{max_rate_play}"
-
-        true ->
-          nil
-      end
-
-    min_rank_play = state.minimum_rank_to_play
-    max_rank_play = state.maximum_rank_to_play
-
-    play_rank_bounds =
-      cond do
-        min_rank_play > 0 and max_rank_play < 1000 ->
-          "Play rank boundaries set to min: #{min_rank_play}, max: #{max_rank_play}"
-
-        min_rank_play > 0 ->
-          "Play rank boundaries set to min: #{min_rank_play}"
-
-        max_rank_play < 1000 ->
-          "Play rank boundaries set to max: #{max_rank_play}"
-
-        true ->
-          nil
-      end
+    play_level_bounds = LobbyPolicy.get_rating_bounds_text(state)
+    play_rank_bounds = LobbyPolicy.get_rank_bounds_text(state)
 
     welcome_message =
       if state.welcome_message do
@@ -822,11 +804,9 @@ defmodule Teiserver.Coordinator.ConsulServer do
   @spec user_allowed_to_play?(T.user(), T.client(), map()) :: boolean()
   defp user_allowed_to_play?(user, client, state) do
     player_list = list_players(state)
+    userid = user.id
 
-    {player_rating, player_uncertainty} =
-      BalanceLib.get_user_rating_value_uncertainty_pair(user.id, "Team")
 
-    player_rating = max(player_rating, 1)
     avoid_status = Account.check_avoid_status(user.id, player_list)
 
     boss_avoid_status =
@@ -836,25 +816,22 @@ defmodule Teiserver.Coordinator.ConsulServer do
       end)
       |> Enum.any?()
 
+    {rating_check_passed, rating_check_msg} =
+      LobbyPolicy.check_rating_to_play(user.id, state)
+
+    {rank_check_passed, rank_check_msg} = LobbyPolicy.check_rank_to_play(user, state)
+
     cond do
-      state.minimum_rating_to_play != nil and player_rating < state.minimum_rating_to_play ->
+      not rating_check_passed ->
+        # Send message
+        msg = rating_check_msg
+        CacheUser.send_direct_message(get_coordinator_userid(), userid, msg)
         false
 
-      state.maximum_rating_to_play != nil and player_rating > state.maximum_rating_to_play ->
-        false
-
-      state.minimum_uncertainty_to_play != nil and
-          player_uncertainty < state.minimum_uncertainty_to_play ->
-        false
-
-      state.maximum_uncertainty_to_play != nil and
-          player_uncertainty > state.maximum_uncertainty_to_play ->
-        false
-
-      state.minimum_rank_to_play != nil and user.rank < state.minimum_rank_to_play ->
-        false
-
-      state.maximum_rank_to_play != nil and user.rank > state.maximum_rank_to_play ->
+      not rank_check_passed ->
+        # Send message
+        msg = rank_check_msg
+        CacheUser.send_direct_message(get_coordinator_userid(), userid, msg)
         false
 
       not Enum.empty?(client.queues) ->
@@ -1342,6 +1319,10 @@ defmodule Teiserver.Coordinator.ConsulServer do
 
     "#{cmd.command}#{remaining}#{error}"
     |> String.trim()
+  end
+
+  def get_coordinator_userid do
+    Coordinator.get_coordinator_userid()
   end
 
   @spec empty_state(T.lobby_id()) :: map()
