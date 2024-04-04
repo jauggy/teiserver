@@ -822,13 +822,13 @@ defmodule Teiserver.Coordinator.ConsulServer do
     {rank_check_passed, rank_check_msg} = LobbyPolicy.check_rank_to_play(user, state)
 
     cond do
-      not rating_check_passed ->
+       rating_check_passed != :ok->
         # Send message
         msg = rating_check_msg
         CacheUser.send_direct_message(get_coordinator_userid(), userid, msg)
         false
 
-      not rank_check_passed ->
+        rank_check_passed != :ok ->
         # Send message
         msg = rank_check_msg
         CacheUser.send_direct_message(get_coordinator_userid(), userid, msg)

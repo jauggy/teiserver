@@ -5,6 +5,7 @@ defmodule Teiserver.Lobby.LobbyPolicy do
   alias Teiserver.CacheUser
   require Logger
   alias Teiserver.Battle.BalanceLib
+  alias Teiserver.Battle
 
   @rank_upper_bound 1000
   @rating_upper_bound 1000
@@ -146,7 +147,7 @@ defmodule Teiserver.Lobby.LobbyPolicy do
   @spec check_rank_to_play(non_neg_integer() | map(), any()) ::
           {false, [<<_::64, _::_*8>>, ...]} | {true, nil}
   @doc """
-  Returns {check_passed?, msg}
+  Returns {:ok, nil} or {:error,msg}
   """
   def check_rank_to_play(user, consul_state) do
     state= consul_state
@@ -154,28 +155,28 @@ defmodule Teiserver.Lobby.LobbyPolicy do
     is_contributor? = CacheUser.is_contributor?(user)
 
     if is_contributor? do
-      {true, nil}
+      {:ok, nil}
     else
       cond do
         state.minimum_rank_to_play != nil and user.rank < state.minimum_rank_to_play ->
           # Send message
           msg = get_failed_rank_check_text(user.rank, state)
-          {false, msg}
+          {:error, msg}
 
 
         state.maximum_rank_to_play != nil and user.rank > state.maximum_rank_to_play ->
           # Send message
           msg = get_failed_rank_check_text(user.rank, state)
-          {false, msg}
+          {:error, msg}
 
         true ->
-          {true, nil}
+          {:ok, nil}
       end
     end
   end
 
   @doc """
-  Returns {check_passed?, msg}
+  Returns {:ok, nil} or {:error,msg}
   """
   def check_rating_to_play(user_id, consul_state) do
     team_size = consul_state.host_teamsize
@@ -196,15 +197,67 @@ defmodule Teiserver.Lobby.LobbyPolicy do
     cond do
       state.minimum_rating_to_play != nil and player_rating < state.minimum_rating_to_play ->
         msg = get_failed_rating_check_text(player_rating, state, rating_type)
-        {false, msg}
+        {:error, msg}
 
       state.maximum_rating_to_play != nil and player_rating > state.maximum_rating_to_play ->
         msg = get_failed_rating_check_text(player_rating, state, rating_type)
-        {false, msg}
+        {:error, msg}
 
       true ->
         # All good
-        {true, nil}
+        {:ok, nil}
+    end
+  end
+
+  @doc"""
+  You cannot have all welcome lobby name if there are restrictions
+  Returns {:ok, nil}
+  Or {:error, msg}
+  """
+  def check_lobby_name(name, consul_state) do
+
+    cond do
+      not has_restrictions?(consul_state) -> {:ok,nil}
+      allwelcome_name?(name) -> {:error, "You cannot declare a lobby to be all welcome if there are player restrictions"}
+      true -> {:ok, nil}
+    end
+  end
+
+  @doc """
+  Check if lobby has restrictions for playing
+  """
+  defp has_restrictions?(consul_state) do
+    state = consul_state
+    cond do
+      state.maximum_rating_to_play < @rating_upper_bound -> true
+      state.minimum_rating_to_play > 0 -> true
+      state.minimum_rank_to_play > 0 -> true
+      state.maximum_rank_to_play < @rank_upper_bound -> true
+      true -> false
+    end
+  end
+
+  def allowed_to_set_restrictions?(state) do
+    name =
+      state.lobby_id
+      |> Battle.get_lobby()
+      |> Map.get(:name)
+
+    cond do
+      allwelcome_name?(name) -> false
+      true -> true
+    end
+  end
+
+  defp allwelcome_name?(name) do
+    name =
+      name
+      |> String.downcase()
+      |> String.replace(" ", "")
+
+    cond do
+      String.contains?(name, "allwelcome") -> true
+      true -> false
     end
   end
 end

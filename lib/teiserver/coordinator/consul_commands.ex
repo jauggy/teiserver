@@ -751,7 +751,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
         %{command: "minchevlevel", remaining: remaining, senderid: senderid} = cmd,
         state
       ) do
-    if allowed_to_set_rating_limit?(state) do
+    if LobbyPolicy.allowed_to_set_restrictions?(state) do
       case Integer.parse(remaining |> String.trim()) do
         :error ->
           Lobby.sayprivateex(
@@ -769,16 +769,12 @@ defmodule Teiserver.Coordinator.ConsulCommands do
           ConsulServer.say_command(cmd, state)
           LobbyLib.cast_lobby(state.lobby_id, :refresh_name)
           level = chev_level - 1
-
-          %{
-            state
-            | minimum_rank_to_play: level |> max(0) |> min(state.maximum_rank_to_play - 1)
-          }
+          Map.merge(state, %{minimum_rank_to_play: level, maximum_rank_to_play: LobbyPolicy.rank_upper_bound})
       end
     else
       Lobby.sayex(
         state.coordinator_id,
-        "You cannot set a rating limit if all are welcome to the game",
+        "You cannot set restrictions if all are welcome to the game",
         state.lobby_id
       )
 
@@ -802,7 +798,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
         %{command: "maxchevlevel", remaining: remaining, senderid: senderid} = cmd,
         state
       ) do
-    if allowed_to_set_rating_limit?(state) do
+    if LobbyPolicy.allowed_to_set_restrictions?(state) do
       case Integer.parse(remaining |> String.trim()) do
         :error ->
           Lobby.sayprivateex(
@@ -829,7 +825,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
     else
       Lobby.sayex(
         state.coordinator_id,
-        "You cannot set a rating limit if all are welcome to the game",
+        "You cannot set restrictions if all are welcome to the game",
         state.lobby_id
       )
 
@@ -847,7 +843,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
         %{command: "minratinglevel", remaining: remaining, senderid: senderid} = cmd,
         state
       ) do
-    if allowed_to_set_rating_limit?(state) do
+    if LobbyPolicy.allowed_to_set_restrictions?(state) do
       case Integer.parse(remaining |> String.trim()) do
         :error ->
           Lobby.sayprivateex(
@@ -889,7 +885,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
         %{command: "maxratinglevel", remaining: remaining, senderid: senderid} = cmd,
         state
       ) do
-    if allowed_to_set_rating_limit?(state) do
+    if LobbyPolicy.allowed_to_set_restrictions?(state) do
       case Integer.parse(remaining |> String.trim()) do
         :error ->
           Lobby.sayprivateex(
@@ -955,7 +951,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
             state
 
           {{min_level_o, _}, {max_level_o, _}} ->
-            if allowed_to_set_rating_limit?(state) do
+            if LobbyPolicy.allowed_to_set_restrictions?(state) do
               min_level = min(min_level_o, max_level_o)
               max_level = max(min_level_o, max_level_o)
 
@@ -1496,12 +1492,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
 
     lobby = Lobby.get_lobby(state.lobby_id)
 
-    not_all_welcome =
-      cond do
-        state.maximum_rating_to_play < LobbyPolicy.rating_upper_bound -> true
-        state.minimum_rating_to_play > 0 -> true
-        true -> false
-      end
+    {check_name_result, check_name_msg} = LobbyPolicy.check_lobby_name(stripped_name, state)
 
     starts_with_lobby_policy =
       new_name
@@ -1548,10 +1539,10 @@ defmodule Teiserver.Coordinator.ConsulCommands do
 
         state
 
-      not_all_welcome && allwelcome_name?(stripped_name) ->
+        check_name_result != :ok ->
         Lobby.sayex(
           state.coordinator_id,
-          "You cannot declare a lobby to be welcome to all if there is a rating limit",
+          check_name_msg,
           state.lobby_id
         )
 
@@ -2083,30 +2074,6 @@ defmodule Teiserver.Coordinator.ConsulCommands do
       },
       data
     )
-  end
-
-  defp allowed_to_set_rating_limit?(state) do
-    name =
-      state.lobby_id
-      |> Battle.get_lobby()
-      |> Map.get(:name)
-
-    cond do
-      allwelcome_name?(name) -> false
-      true -> true
-    end
-  end
-
-  defp allwelcome_name?(name) do
-    name =
-      name
-      |> String.downcase()
-      |> String.replace(" ", "")
-
-    cond do
-      String.contains?(name, "allwelcome") -> true
-      true -> false
-    end
   end
 
   @spec get_lock(String.t()) :: atom | nil
