@@ -24,7 +24,6 @@ defmodule Teiserver.Coordinator.ConsulCommands do
   @default_ban_reason "Banned"
   # If max rank set to this value, there will be no max rank requirements
 
-
   #################### For everybody
   def handle_command(%{command: "s"} = cmd, state),
     do: handle_command(Map.put(cmd, :command, "status"), state)
@@ -726,13 +725,13 @@ defmodule Teiserver.Coordinator.ConsulCommands do
   def handle_command(%{command: "resetratinglevels", remaining: ""} = cmd, state) do
     ConsulServer.say_command(cmd, state)
     LobbyLib.cast_lobby(state.lobby_id, :refresh_name)
-    %{state | minimum_rating_to_play: 0, maximum_rating_to_play: LobbyPolicy.rating_upper_bound}
+    %{state | minimum_rating_to_play: 0, maximum_rating_to_play: LobbyPolicy.rating_upper_bound()}
   end
 
   def handle_command(%{command: "resetchevlevels", remaining: ""} = cmd, state) do
     ConsulServer.say_command(cmd, state)
     LobbyLib.cast_lobby(state.lobby_id, :refresh_name)
-    %{state | minimum_rank_to_play: 0, maximum_rank_to_play: LobbyPolicy.rank_upper_bound}
+    %{state | minimum_rank_to_play: 0, maximum_rank_to_play: LobbyPolicy.rank_upper_bound()}
   end
 
   @doc """
@@ -769,7 +768,11 @@ defmodule Teiserver.Coordinator.ConsulCommands do
           ConsulServer.say_command(cmd, state)
           LobbyLib.cast_lobby(state.lobby_id, :refresh_name)
           level = chev_level - 1
-          Map.merge(state, %{minimum_rank_to_play: level, maximum_rank_to_play: LobbyPolicy.rank_upper_bound})
+
+          Map.merge(state, %{
+            minimum_rank_to_play: level,
+            maximum_rank_to_play: LobbyPolicy.rank_upper_bound()
+          })
       end
     else
       Lobby.sayex(
@@ -788,7 +791,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
   def handle_command(%{command: "maxchevlevel", remaining: ""} = cmd, state) do
     ConsulServer.say_command(cmd, state)
     LobbyLib.cast_lobby(state.lobby_id, :refresh_name)
-    %{state | maximum_rank_to_play: LobbyPolicy.rank_upper_bound}
+    %{state | maximum_rank_to_play: LobbyPolicy.rank_upper_bound()}
   end
 
   @doc """
@@ -861,8 +864,10 @@ defmodule Teiserver.Coordinator.ConsulCommands do
           ConsulServer.say_command(cmd, state)
           LobbyLib.cast_lobby(state.lobby_id, :refresh_name)
 
-          Map.merge(state, %{minimum_rating_to_play: level, maximum_rating_to_play: LobbyPolicy.rating_upper_bound})
-
+          Map.merge(state, %{
+            minimum_rating_to_play: level,
+            maximum_rating_to_play: LobbyPolicy.rating_upper_bound()
+          })
       end
     else
       Lobby.sayex(
@@ -878,7 +883,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
   def handle_command(%{command: "maxratinglevel", remaining: ""} = cmd, state) do
     ConsulServer.say_command(cmd, state)
     LobbyLib.cast_lobby(state.lobby_id, :refresh_name)
-    %{state | maximum_rating_to_play: LobbyPolicy.rating_upper_bound}
+    %{state | maximum_rating_to_play: LobbyPolicy.rating_upper_bound()}
   end
 
   def handle_command(
@@ -1050,7 +1055,14 @@ defmodule Teiserver.Coordinator.ConsulCommands do
       {level, _} ->
         ConsulServer.say_command(cmd, state)
         LobbyLib.cast_lobby(state.lobby_id, :refresh_name)
-        %{state | maximum_rank_to_play: level |> min(LobbyPolicy.rating_upper_bound) |> max(state.minimum_rank_to_play + 1)}
+
+        %{
+          state
+          | maximum_rank_to_play:
+              level
+              |> min(LobbyPolicy.rating_upper_bound())
+              |> max(state.minimum_rank_to_play + 1)
+        }
     end
   end
 
@@ -1095,7 +1107,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
             %{
               state
               | minimum_rank_to_play: max(min_level, 0),
-                maximum_rank_to_play: min(max_level, LobbyPolicy.rank_upper_bound)
+                maximum_rank_to_play: min(max_level, LobbyPolicy.rank_upper_bound())
             }
         end
 
@@ -1539,7 +1551,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
 
         state
 
-        check_name_result != :ok ->
+      check_name_result != :ok ->
         Lobby.sayex(
           state.coordinator_id,
           check_name_msg,
@@ -1567,21 +1579,13 @@ defmodule Teiserver.Coordinator.ConsulCommands do
 
         ConsulServer.say_command(cmd, state)
 
-        downcase_name = new_name |> String.downcase()
-
-        skill_name =
-          [
-            String.contains?(downcase_name, "noob"),
-            String.contains?(downcase_name, "newbie")
-          ]
-          |> Enum.any?()
-
-        if skill_name do
-          Lobby.sayex(
+        if check_name_msg != nil do
+           Lobby.sayex(
             state.coordinator_id,
-            "Don't forget you can set skill requirements using the setratinglevels command, use $help setratinglevels for more information.",
+            check_name_msg,
             state.lobby_id
           )
+
         end
 
         state
@@ -1591,6 +1595,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
 
       true ->
         Battle.rename_lobby(state.lobby_id, new_name, nil)
+
         state
     end
   end
@@ -2102,6 +2107,4 @@ defmodule Teiserver.Coordinator.ConsulCommands do
 
   @spec get_queue(map()) :: [T.userid()]
   defdelegate get_queue(state), to: ConsulServer
-
-
 end

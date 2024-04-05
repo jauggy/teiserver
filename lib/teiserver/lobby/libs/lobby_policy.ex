@@ -131,17 +131,23 @@ defmodule Teiserver.Lobby.LobbyPolicy do
 
   def get_failed_rank_check_text(player_rank, consul_state) do
     bounds = get_rank_bounds_for_title(consul_state)
-    [@splitter,
-    "You don't meet the chevron requirements for this lobby (#{bounds}). Your chevron level is #{player_rank + 1}. Learn more about chevrons here:",
-    "https://www.beyondallreason.info/guide/rating-and-lobby-balance#rank-icons"]
+
+    [
+      @splitter,
+      "You don't meet the chevron requirements for this lobby (#{bounds}). Your chevron level is #{player_rank + 1}. Learn more about chevrons here:",
+      "https://www.beyondallreason.info/guide/rating-and-lobby-balance#rank-icons"
+    ]
   end
 
   def get_failed_rating_check_text(player_rating, consul_state, rating_type) do
     bounds = get_rating_bounds_for_title(consul_state)
     player_rating_text = player_rating |> Decimal.from_float() |> Decimal.round(2)
-    [@splitter,
-    "You don't meet the rating requirements for this lobby (#{bounds}). Your #{rating_type} match rating is #{player_rating_text}. Learn more about rating here:",
-    "https://www.beyondallreason.info/guide/rating-and-lobby-balance#openskill"]
+
+    [
+      @splitter,
+      "You don't meet the rating requirements for this lobby (#{bounds}). Your #{rating_type} match rating is #{player_rating_text}. Learn more about rating here:",
+      "https://www.beyondallreason.info/guide/rating-and-lobby-balance#openskill"
+    ]
   end
 
   @spec check_rank_to_play(non_neg_integer() | map(), any()) ::
@@ -150,7 +156,7 @@ defmodule Teiserver.Lobby.LobbyPolicy do
   Returns {:ok, nil} or {:error,msg}
   """
   def check_rank_to_play(user, consul_state) do
-    state= consul_state
+    state = consul_state
     # Contributors auto pass since their ranks are messed up
     is_contributor? = CacheUser.is_contributor?(user)
 
@@ -162,7 +168,6 @@ defmodule Teiserver.Lobby.LobbyPolicy do
           # Send message
           msg = get_failed_rank_check_text(user.rank, state)
           {:error, msg}
-
 
         state.maximum_rank_to_play != nil and user.rank > state.maximum_rank_to_play ->
           # Send message
@@ -181,18 +186,19 @@ defmodule Teiserver.Lobby.LobbyPolicy do
   def check_rating_to_play(user_id, consul_state) do
     team_size = consul_state.host_teamsize
 
-    #team_count = consul_state.host_teamcount
-    state  = consul_state
-    rating_type = cond do
-      team_size == 1 -> "Duel"
-      true -> "Team"
-    end
+    # team_count = consul_state.host_teamcount
+    state = consul_state
+
+    rating_type =
+      cond do
+        team_size == 1 -> "Duel"
+        true -> "Team"
+      end
 
     {player_rating, player_uncertainty} =
       BalanceLib.get_user_rating_value_uncertainty_pair(user_id, rating_type)
 
     player_rating = max(player_rating, 1)
-
 
     cond do
       state.minimum_rating_to_play != nil and player_rating < state.minimum_rating_to_play ->
@@ -209,17 +215,22 @@ defmodule Teiserver.Lobby.LobbyPolicy do
     end
   end
 
-  @doc"""
+  @doc """
   You cannot have all welcome lobby name if there are restrictions
   Returns {:ok, nil}
   Or {:error, msg}
   """
   def check_lobby_name(name, consul_state) do
-
     cond do
-      not has_restrictions?(consul_state) -> {:ok,nil}
-      allwelcome_name?(name) -> {:error, "You cannot declare a lobby to be all welcome if there are player restrictions"}
-      true -> {:ok, nil}
+      has_restrictions?(consul_state) and allwelcome_name?(name) ->
+        {:error, "* You cannot declare a lobby to be all welcome if there are player restrictions"}
+
+      noob_name?(name) ->
+        {:ok,
+         "* Name updated succesfully. To restrict this lobby to players who are new, you can use the $maxchevlevel command. For example: $maxchevlevel 3"}
+
+      true ->
+        {:ok, nil}
     end
   end
 
@@ -228,6 +239,7 @@ defmodule Teiserver.Lobby.LobbyPolicy do
   """
   defp has_restrictions?(consul_state) do
     state = consul_state
+
     cond do
       state.maximum_rating_to_play < @rating_upper_bound -> true
       state.minimum_rating_to_play > 0 -> true
@@ -257,6 +269,22 @@ defmodule Teiserver.Lobby.LobbyPolicy do
 
     cond do
       String.contains?(name, "allwelcome") -> true
+      true -> false
+    end
+  end
+
+  @doc """
+  Checks if the name contains noob
+  """
+  defp noob_name?(name) do
+    name =
+      name
+      |> String.downcase()
+      |> String.replace(" ", "")
+
+    cond do
+      String.contains?(name, "noob") -> true
+      String.contains?(name, "newb") -> true
       true -> false
     end
   end
