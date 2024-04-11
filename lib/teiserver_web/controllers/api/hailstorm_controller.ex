@@ -21,10 +21,44 @@ defmodule TeiserverWeb.API.HailstormController do
     |> render("result.json")
   end
 
+  #Update the database with player minutes
+  def update_player_minutes(user, player_minutes) do
+    user_id = user.id
+    Account.update_user_stat(user_id, %{
+      player_minutes: player_minutes,
+      total_minutes: player_minutes
+    })
+
+    #Now recalculate ranks
+    #This calc would usually be done in do_login
+    rank= CacheUser.calculate_rank(user_id)
+    user = %{
+      user
+      |
+        rank: rank,
+    }
+    CacheUser.update_user(user, persist: true)
+  end
+
+  @doc """
+  This endpoint is used by Hailstorm tests.
+  The name sent will be appended with _hailstorm before saving in db.
+  """
   @spec create_user(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def create_user(conn, params) do
     email = params["email"] || params["name"]
-    name = params["name"] <> "_hailstorm"
+
+    name =
+      case String.ends_with?(params["name"], "_hailstorm") do
+        false ->
+          params["name"] <> "_hailstorm"
+
+        true ->
+          params["name"]
+      end
+
+    # If player_minutes is sent as param we will also update this
+    player_minutes = params["player_minutes"] || 0
 
     result =
       case Account.get_user_by_email(email) do
@@ -36,6 +70,8 @@ defmodule TeiserverWeb.API.HailstormController do
 
               # Specific updates
               CacheUser.add_roles(db_user.id, params["roles"])
+
+              update_player_minutes(db_user, player_minutes)
 
               %{userid: db_user.id}
 
@@ -50,6 +86,8 @@ defmodule TeiserverWeb.API.HailstormController do
         user ->
           # Update the user
           CacheUser.add_roles(user.id, params["roles"])
+
+          update_player_minutes(user, player_minutes)
 
           CacheUser.set_flood_level(user.id, 0)
           %{userid: user.id}
