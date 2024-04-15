@@ -5,11 +5,23 @@ defmodule Teiserver.Account.LeaderboardReport do
   import Teiserver.Helper.NumberHelper, only: [int_parse: 1]
   alias Teiserver.Repo
 
+  #User must be active in last x days
+  @active_days_requirement 35
+
   @spec icon() :: String.t()
   def icon(), do: Teiserver.Account.RatingLib.icon()
 
   @spec permissions() :: String.t()
   def permissions(), do: "Admin"
+
+   @doc"""
+   Returns a datetime. Users must have activity since that date to quality for Leaderboard
+   """
+  def get_min_activity_date(days \\ @active_days_requirement) do
+      Timex.today()
+      |> Timex.shift(days: -days)
+      |> Timex.to_datetime()
+  end
 
   @spec run(Plug.Conn.t(), map()) :: {list(), map()}
   def run(_conn, params) do
@@ -19,9 +31,7 @@ defmodule Teiserver.Account.LeaderboardReport do
     limit = params["limit"] |> int_parse
 
     activity_time =
-      Timex.today()
-      |> Timex.shift(days: -days)
-      |> Timex.to_datetime()
+      get_min_activity_date(days)
 
     type_name = params["game_type"]
 
@@ -129,7 +139,7 @@ defmodule Teiserver.Account.LeaderboardReport do
   defp apply_defaults(params) do
     Map.merge(
       %{
-        "days" => "35",
+        "days" => @active_days_requirement,
         "limit" => "50",
         "game_type" => MatchRatingLib.rating_type_list() |> hd,
         "extended" => "false"

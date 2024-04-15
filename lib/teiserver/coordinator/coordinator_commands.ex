@@ -5,10 +5,18 @@ defmodule Teiserver.Coordinator.CoordinatorCommands do
   alias Teiserver.Account.{AccoladeLib, CodeOfConductData}
   alias Teiserver.Coordinator.CoordinatorLib
   alias Teiserver.Config
+  alias Teiserver.Game.MatchRatingLib
+  alias Teiserver.Account.LeaderboardReport
+  require Logger
 
   @splitter "---------------------------"
-  @always_allow ~w(help whoami whois discord coc ignore mute ignore unmute unignore matchmaking website party)
+  @always_allow ~w(duelstats ffastats teamstats help whoami whois discord coc ignore mute ignore unmute unignore matchmaking website party)
+  @mod_allow ~w(check modparty unparty)
   @forward_to_consul ~w(s status players follow joinq leaveq splitlobby y yes n no explain)
+
+  def is_coordinator_command?(command) do
+    Enum.member?(@always_allow, command) || Enum.member?(@mod_allow, command)
+  end
 
   @spec allow_command?(Map.t(), Map.t()) :: boolean()
   defp allow_command?(%{senderid: senderid} = cmd, state) do
@@ -193,12 +201,38 @@ defmodule Teiserver.Coordinator.CoordinatorCommands do
         "Profile link: #{profile_link}",
         "Skill ratings:",
         ratings,
-        accolades_string
+        accolades_string,
+        "",
+        "Use commands $teamstats, $duelstats, or $ffastats for more detailed info."
       ]
       |> List.flatten()
       |> Enum.reject(fn l -> l == nil end)
 
     CacheUser.send_direct_message(state.userid, senderid, msg)
+    state
+  end
+
+  defp do_handle(%{command: "teamstats", senderid: senderid, remaining: remaining} = _cmd, state) do
+    username = remaining
+
+    send_stats_messages(username, "Team", senderid, state)
+
+    state
+  end
+
+  defp do_handle(%{command: "ffastats", senderid: senderid, remaining: remaining} = _cmd, state) do
+    username = remaining
+
+    send_stats_messages(username, "FFA", senderid, state)
+
+    state
+  end
+
+  defp do_handle(%{command: "duelstats", senderid: senderid, remaining: remaining} = _cmd, state) do
+    username = remaining
+
+    send_stats_messages(username, "Duel", senderid, state)
+
     state
   end
 
@@ -556,4 +590,113 @@ defmodule Teiserver.Coordinator.CoordinatorCommands do
   end
 
   defp say_command(_), do: :ok
+
+  defp get_percentile(rank, number_of_data_points) do
+    percentile = rank / number_of_data_points * 100
+
+    decimals =
+      case percentile < 1 do
+        true ->
+          2
+
+        false ->
+          0
+      end
+
+    format_number(percentile, decimals)
+  end
+
+  def send_stats_messages(username_input, rating_type, senderid, state) do
+    user =
+      cond do
+        username_input == nil || username_input == "" -> CacheUser.get_user_by_id(senderid)
+        true -> CacheUser.get_user_by_name(username_input)
+      end
+
+    case user do
+      nil ->
+        msg = "Unable to find a user with that name"
+
+        CacheUser.send_direct_message(
+          state.userid,
+          senderid,
+          msg
+        )
+
+        {:error, msg}
+
+      _ ->
+        activity_time = LeaderboardReport.get_min_activity_date()
+
+        user_id = user.id
+        username = user.name
+        rating_type_id = MatchRatingLib.rating_type_name_lookup()[rating_type]
+
+        ratings =
+          Account.list_ratings(
+            search: [
+              rating_type_id: rating_type_id,
+              updated_after: activity_time
+            ],
+            order_by: "Leaderboard rating high to low"
+          )
+
+        # Find the user in the rankings
+        result =
+          Enum.reduce_while(ratings, {:not_found, 0}, fn el, {:not_found, index} ->
+            if el.user_id == user_id,
+              do: {:halt, {:found, index, el}},
+              else: {:cont, {:not_found, index + 1}}
+          end)
+
+        case result do
+          {:found, index, x} ->
+            rank = index + 1
+            datapoints = length(ratings)
+
+            percentile = get_percentile(rank, datapoints)
+
+            leaderboard_rating = format_number(x.leaderboard_rating)
+            os = format_number(x.rating_value)
+            skill = format_number(x.skill)
+            uncertainty = format_number(x.uncertainty)
+
+            msgs = [
+              @splitter,
+              "#{rating_type} Stats",
+              "#{username}",
+              @splitter,
+              "OS: #{os}, Skill: #{skill}, Uncertainty: #{uncertainty}",
+              "Leaderboard Rank: #{rank} => Top #{percentile}%",
+              "Leaderboard Rating: #{leaderboard_rating}",
+              "",
+              "Learn more about Leaderboard Rating here:",
+              "https://www.beyondallreason.info/guide/rating-and-lobby-balance#leaderboard-rating"
+            ]
+
+            CacheUser.send_direct_message(user_id, senderid, msgs)
+
+            {:ok,
+             %{
+               rating_type: rating_type,
+               username: username,
+               os: x.rating_value,
+               skill: x.skill,
+               uncertainty: x.uncertainty,
+               rank: rank,
+               percentile: Decimal.to_float(percentile),
+               leaderboard_rating: x.leaderboard_rating
+             }}
+
+          _ ->
+            msg = "#{username} doesn't have a recent #{rating_type} Rating"
+            CacheUser.send_direct_message(user_id, senderid, msg)
+            {:error, msg}
+        end
+    end
+  end
+
+  defp format_number(number, decimals \\ 2) do
+    number |> Decimal.from_float() |> Decimal.round(decimals)
+  end
 end

@@ -17,21 +17,17 @@ defmodule Teiserver.Coordinator.ConsulServer do
     Config,
     Communication
   }
-
   alias Teiserver.Lobby.{ChatLib}
   import Teiserver.Helper.NumberHelper, only: [int_parse: 1]
   alias Phoenix.PubSub
   alias Teiserver.Battle.BalanceLib
   alias Teiserver.Data.Types, as: T
-  alias Teiserver.Coordinator.{ConsulCommands, CoordinatorLib, SpadsParser}
-
-  # Commands that are always forwarded to the coordinator itself, not the consul server
-  @coordinator_bot ~w(whoami whois check discord help coc ignore mute ignore unmute unignore matchmaking website party modparty unparty)
+  alias Teiserver.Coordinator.{ConsulCommands, CoordinatorLib, SpadsParser, CoordinatorCommands}
 
   @always_allow ~w(status s y n follow joinq leaveq splitlobby afks roll players password? newlobby jazlobby tournament)
   @boss_commands ~w(balancemode gatekeeper welcome-message meme reset-approval rename resetratinglevels minratinglevel maxratinglevel setratinglevels)
   @vip_boss_commands ~w(shuffle)
-  @host_commands ~w(specunready makeready settag speclock forceplay lobbyban lobbybanmult unban forcespec forceplay lock unlock makebalance)
+  @host_commands ~w(set specunready makeready settag speclock forceplay lobbyban lobbybanmult unban forcespec forceplay lock unlock makebalance)
 
   # @handled_by_lobby ~w(explain)
 
@@ -351,7 +347,7 @@ defmodule Teiserver.Coordinator.ConsulServer do
 
   def handle_info(%{command: command} = cmd, state) do
     cond do
-      Enum.member?(@coordinator_bot, command) ->
+      CoordinatorCommands.is_coordinator_command?(command) ->
         Coordinator.cast_coordinator(
           {:consul_command, Map.merge(cmd, %{lobby_id: state.lobby_id, host_id: state.host_id})}
         )
