@@ -6,11 +6,12 @@ defmodule Teiserver.Coordinator.StatsTest do
   alias Teiserver.Game.MatchRatingLib
   alias Teiserver.Coordinator.CoordinatorCommands
 
+  # These functions hit the database so we will mock them instead
   setup_with_mocks([
     {CacheUser, [:passthrough],
      [
-       get_user_by_id: fn _member_id -> get_user() end,
-       get_user_by_name: fn _name -> get_user() end,
+       get_user_by_id: fn member_id -> get_user(member_id) end,
+       get_user_by_name: fn name -> get_user(name) end,
        send_direct_message: fn _x, _y, _z -> nil end
      ]},
     {
@@ -32,8 +33,14 @@ defmodule Teiserver.Coordinator.StatsTest do
     assert 1 == MatchRatingLib.rating_type_name_lookup()["Duel"]
   end
 
+  test "Ask non-existant user" do
+    result = CoordinatorCommands.send_stats_messages("John", "Team", 0, %{userid: 0})
+
+    assert result == {:error, "Unable to find a user with that name"}
+  end
+
   test "send team stats_messages" do
-    result = CoordinatorCommands.send_stats_messages("Joshua", "Team", 0, %{})
+    result = CoordinatorCommands.send_stats_messages("Joshua", "Team", 0, %{userid: 0})
 
     assert result ==
              {:ok,
@@ -54,12 +61,23 @@ defmodule Teiserver.Coordinator.StatsTest do
     assert result == {:error, "Joshua doesn't have a recent Duel Rating"}
   end
 
+  test "send FFA stats_messages" do
+    result = CoordinatorCommands.send_stats_messages("Joshua", "FFA", 0, %{})
+    assert result == {:error, "Joshua doesn't have a recent FFA Rating"}
+  end
+
   # Mocks
-  defp get_user() do
-    %{
-      id: 42,
-      name: "Joshua"
-    }
+  defp get_user(name) do
+    case name do
+      "Joshua" ->
+        %{
+          id: 42,
+          name: "Joshua"
+        }
+
+      _ ->
+        nil
+    end
   end
 
   defp list_ratings(opts) do
@@ -71,7 +89,7 @@ defmodule Teiserver.Coordinator.StatsTest do
         []
 
       # Team
-      true ->
+      rating_type_id == 2 ->
         [
           %{
             user_id: 42,
@@ -110,6 +128,10 @@ defmodule Teiserver.Coordinator.StatsTest do
             last_updated: ~U[2024-03-22 08:36:06Z]
           }
         ]
+
+      # Anything else
+      true ->
+        []
     end
   end
 end
