@@ -2,15 +2,12 @@ defmodule TeiserverWeb.API.PublicController do
   use TeiserverWeb, :controller
   alias Teiserver.Game.MatchRatingLib
   alias Teiserver.Account
-
+  alias Teiserver.Account.LeaderboardReport
   @spec leaderboard(Plug.Conn.t(), map) :: Plug.Conn.t()
   def leaderboard(conn, %{"type" => type_name}) do
     type_id = MatchRatingLib.rating_type_name_lookup()[type_name]
 
-    activity_time =
-      Timex.today()
-      |> Timex.shift(days: -35)
-      |> Timex.to_datetime()
+    activity_time =LeaderboardReport.get_min_activity_date()
 
     ratings =
       case type_id do
