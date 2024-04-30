@@ -11,7 +11,7 @@ defmodule Mix.Tasks.Teiserver.Fakedata do
 
   @settings %{
     # days: 365,
-    days: 5,
+    days: 365,
     memory: 1024 * 1024 * 1024,
     maps: ["Koom valley", "Comet catcher", "Tabula"]
   }
@@ -314,9 +314,10 @@ defmodule Mix.Tasks.Teiserver.Fakedata do
       users =
         Account.list_users(
           search: [
-            inserted_after: Timex.to_datetime(date),
+            inserted_before: Timex.to_datetime(date),
             not_has_role: "Bot"
           ],
+          limit: :infinity,
           select: [:id, :name]
         )
         |> Enum.map(fn %{id: id, name: name} -> {id, name} end)
