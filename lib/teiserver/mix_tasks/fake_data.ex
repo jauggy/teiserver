@@ -86,9 +86,9 @@ defmodule Mix.Tasks.Teiserver.Fakedata do
 
     new_users =
       Range.new(0, @settings.days)
-      |> Parallel.map(fn day ->
+      |> ParallelStream.map(fn day ->
         Range.new(0, users_per_day())
-        |> Parallel.map(fn _ ->
+        |> ParallelStream.map(fn _ ->
           minutes = :rand.uniform(24 * 60)
 
           %{
@@ -109,8 +109,8 @@ defmodule Mix.Tasks.Teiserver.Fakedata do
             inserted_at: Timex.shift(Timex.now(), days: -day, minutes: -minutes) |> time_convert,
             updated_at: Timex.shift(Timex.now(), days: -day, minutes: -minutes) |> time_convert
           }
-        end)
-      end)
+        end) |> Enum.to_list()
+      end) |> Enum.to_list()
       |> List.flatten()
 
     Ecto.Multi.new()

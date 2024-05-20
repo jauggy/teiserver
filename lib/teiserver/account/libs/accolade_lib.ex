@@ -350,7 +350,7 @@ defmodule Teiserver.Account.AccoladeLib do
   @spec get_badge_types() :: [{non_neg_integer(), map()}]
   def get_badge_types() do
     Teiserver.cache_get_or_store(:application_temp_cache, "accolade_badges", fn ->
-      Account.list_badge_types(search: [has_purpose: "Accolade"], order_by: "Name (A-Z)")
+      Account.list_badge_types(search: [purpose: "Accolade"], order_by: "Name (A-Z)")
       |> Enum.with_index()
       |> Enum.map(fn {bt, i} -> {i + 1, bt} end)
     end)
@@ -384,10 +384,10 @@ defmodule Teiserver.Account.AccoladeLib do
 
           pings =
             children
-            |> Parallel.filter(fn {_, _, _, [module]} ->
+            |> ParallelStream.filter(fn {_, _, _, [module]} ->
               module == Teiserver.Account.AccoladeChatServer
             end)
-            |> Parallel.map(fn {_, pid, _, _} ->
+            |> ParallelStream.map(fn {_, pid, _, _} ->
               case GenServer.call(pid, :ping, 5000) do
                 :ok -> :ok
                 _ -> :not_okay
