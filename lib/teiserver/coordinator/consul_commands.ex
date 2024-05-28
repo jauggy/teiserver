@@ -633,9 +633,9 @@ defmodule Teiserver.Coordinator.ConsulCommands do
       |> String.downcase()
       |> String.trim()
 
-      is_moderator = CacheUser.is_moderator?(senderid)
+    is_moderator = CacheUser.is_moderator?(senderid)
 
-      allowed_choices = Teiserver.Battle.BalanceLib.get_allowed_algorithms(is_moderator)
+    allowed_choices = Teiserver.Battle.BalanceLib.get_allowed_algorithms(is_moderator)
 
     if Enum.member?(allowed_choices, remaining) do
       ChatLib.say(
@@ -1576,12 +1576,11 @@ defmodule Teiserver.Coordinator.ConsulCommands do
         ConsulServer.say_command(cmd, state)
 
         if check_name_msg != nil do
-           Lobby.sayex(
+          Lobby.sayex(
             state.coordinator_id,
             check_name_msg,
             state.lobby_id
           )
-
         end
 
         state
