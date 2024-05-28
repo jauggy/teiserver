@@ -1,8 +1,8 @@
 defmodule Teiserver.Battle.SplitOneChevsInternalTest do
   @moduledoc """
   This tests the internal functions of SplitOneChevs
-  Can run tests in this file only by
-  mix test test/teiserver/battle/split_one_chevs_internal_test.exs
+  Can run all balance tests via
+  mix test --only balance_test
   """
   use ExUnit.Case
   @moduletag :balance_test
@@ -16,7 +16,8 @@ defmodule Teiserver.Battle.SplitOneChevsInternalTest do
         group_rating: 13,
         ratings: [8, 5],
         ranks: [1, 0],
-        names: ["Pro1", "Noob1"]
+        names: ["Pro1", "Noob1"],
+        rank_times: [15, 1]
       },
       %{
         count: 1,
@@ -24,7 +25,8 @@ defmodule Teiserver.Battle.SplitOneChevsInternalTest do
         group_rating: 6,
         ratings: [6],
         ranks: [0],
-        names: ["Noob2"]
+        names: ["Noob2"],
+        rank_times: [1]
       },
       %{
         count: 1,
@@ -32,7 +34,8 @@ defmodule Teiserver.Battle.SplitOneChevsInternalTest do
         group_rating: 7,
         ratings: [17],
         ranks: [0],
-        names: ["Noob3"]
+        names: ["Noob3"],
+        rank_times: [1]
       }
     ]
 
@@ -40,12 +43,22 @@ defmodule Teiserver.Battle.SplitOneChevsInternalTest do
 
     assert result.team_groups == %{
              1 => [
-               %{count: 1, group_rating: 6, members: ["Noob2"], ratings: [6]},
+               %{
+                 count: 1,
+                 group_rating: 0.3333333333333333,
+                 members: ["Noob1"],
+                 ratings: [0.3333333333333333]
+               },
                %{count: 1, group_rating: 8, members: ["Pro1"], ratings: [8]}
              ],
              2 => [
-               %{count: 1, group_rating: 5, members: ["Noob1"], ratings: [5]},
-               %{count: 1, group_rating: 17, members: ["Noob3"], ratings: [17]}
+               %{count: 1, group_rating: 0.4, members: ["Noob2"], ratings: [0.4]},
+               %{
+                 count: 1,
+                 group_rating: 1.1333333333333333,
+                 members: ["Noob3"],
+                 ratings: [1.1333333333333333]
+               }
              ]
            }
   end

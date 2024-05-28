@@ -10,7 +10,9 @@ defmodule Teiserver.Battle.Balance.BalanceTypes do
           names: [String.t()],
           ranks: [non_neg_integer()],
           group_rating: rating_value(),
-          count: non_neg_integer()
+          count: non_neg_integer(),
+          # Playtime hours + half spec time
+          rank_times: [non_neg_integer()]
         }
 
   @type group() :: %{
