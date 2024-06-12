@@ -131,7 +131,9 @@ defmodule TeiserverWeb.Admin.MatchController do
       |> List.flatten()
 
     past_balance =
-      BalanceLib.create_balance(groups, match.team_count, mode: :loser_picks)
+      BalanceLib.create_balance(groups, match.team_count,
+        algorithm: get_analysis_balance_algorithm()
+      )
       |> Map.put(:balance_mode, :grouped)
 
     # What about new balance?
@@ -256,7 +258,14 @@ defmodule TeiserverWeb.Admin.MatchController do
       end)
       |> List.flatten()
 
-    BalanceLib.create_balance(groups, match.team_count, mode: :loser_picks)
+    BalanceLib.create_balance(groups, match.team_count,
+      algorithm: get_analysis_balance_algorithm()
+    )
     |> Map.put(:balance_mode, :grouped)
+  end
+
+  defp get_analysis_balance_algorithm() do
+    # TODO move this from config into a dropdown so it can be selected on this page
+    Application.get_env(:teiserver, Teiserver)[:analysis_balance_algorithm] || "loser_picks"
   end
 end

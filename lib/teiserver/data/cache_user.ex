@@ -1270,14 +1270,25 @@ defmodule Teiserver.CacheUser do
   def is_verified?(%{roles: roles}), do: Enum.member?(roles, "Verified")
   def is_verified?(_), do: false
 
-  @spec rank_time(T.userid()) :: non_neg_integer()
-  def rank_time(userid) do
+  @spec rank_time(T.userid() | map()) :: non_neg_integer()
+  def rank_time(userid) when is_number(userid) do
     stats = Account.get_user_stat(userid) || %{data: %{}}
+    data = Map.get(stats, :data, %{})
 
+    rank_time(data)
+  end
+
+  @doc """
+  Get data from stats table (data column) to calculate rank time.
+  This is used to calculate chevrons.
+  """
+  def rank_time(stats_data) when is_map(stats_data) do
     ingame_minutes =
-      (stats.data["player_minutes"] || 0) + (stats.data["spectator_minutes"] || 0) * 0.5
+      (stats_data["player_minutes"] || 0) + (stats_data["spectator_minutes"] || 0) * 0.5
 
-    round(ingame_minutes / 60)
+    # Hours are rounded down which helps to determine if a user has hit a
+    # chevron hours threshold. So a user with 4.9 hours is still chevron 1 or rank 0
+    trunc(ingame_minutes / 60)
   end
 
   # Based on actual ingame time
@@ -1310,13 +1321,15 @@ defmodule Teiserver.CacheUser do
   def calculate_rank(userid, "Role") do
     ingame_hours = rank_time(userid)
 
+    # Thresholds should match what is on the website:
+    # https://www.beyondallreason.info/guide/rating-and-lobby-balance#rank-icons
     cond do
       has_any_role?(userid, ~w(Core Contributor)) -> 6
-      ingame_hours > 1000 -> 5
-      ingame_hours > 250 -> 4
-      ingame_hours > 100 -> 3
-      ingame_hours > 15 -> 2
-      ingame_hours > 5 -> 1
+      ingame_hours >= 1000 -> 5
+      ingame_hours >= 250 -> 4
+      ingame_hours >= 100 -> 3
+      ingame_hours >= 15 -> 2
+      ingame_hours >= 5 -> 1
       true -> 0
     end
   end
