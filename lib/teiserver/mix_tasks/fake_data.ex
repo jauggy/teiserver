@@ -7,6 +7,7 @@ defmodule Mix.Tasks.Teiserver.Fakedata do
 
   alias Teiserver.{Account, Logging, Battle, Moderation}
   alias Teiserver.Helper.StylingHelper
+  alias Teiserver.Battle.MatchLib
   require Logger
 
   @settings %{
@@ -86,9 +87,9 @@ defmodule Mix.Tasks.Teiserver.Fakedata do
 
     new_users =
       Range.new(0, @settings.days)
-      |> Parallel.map(fn day ->
+      |> ParallelStream.map(fn day ->
         Range.new(0, users_per_day())
-        |> Parallel.map(fn _ ->
+        |> ParallelStream.map(fn _ ->
           minutes = :rand.uniform(24 * 60)
 
           %{
@@ -110,7 +111,9 @@ defmodule Mix.Tasks.Teiserver.Fakedata do
             updated_at: Timex.shift(Timex.now(), days: -day, minutes: -minutes) |> time_convert
           }
         end)
+        |> Enum.to_list()
       end)
+      |> Enum.to_list()
       |> List.flatten()
 
     Ecto.Multi.new()
@@ -331,6 +334,8 @@ defmodule Mix.Tasks.Teiserver.Fakedata do
         team1 = shuffled_users |> Enum.take(team_size)
         team2 = shuffled_users |> Enum.reverse() |> Enum.take(team_size)
 
+        game_type = MatchLib.game_type(team_size, 2)
+
         team1_score =
           team1
           |> Enum.map(fn {_, name} -> String.length(name) end)
@@ -356,7 +361,7 @@ defmodule Mix.Tasks.Teiserver.Fakedata do
             team_size: team_size,
             passworded: false,
             processed: true,
-            game_type: if(team_size == 1, do: "Duel", else: "Team"),
+            game_type: game_type,
 
             # All rooms are hosted by the same user for now
             founder_id: 1,

@@ -10,15 +10,17 @@ defmodule Teiserver.Battle.Balance.BalanceTypes do
           names: [String.t()],
           ranks: [non_neg_integer()],
           group_rating: rating_value(),
-          count: non_neg_integer()
+          count: non_neg_integer(),
+          # Playtime hours + half spec time
+          rank_times: [non_neg_integer()]
         }
 
   @type group() :: %{
-    members: [T.userid()],
-    ratings: [rating_value()],
-    group_rating: rating_value(),
-    count: non_neg_integer()
-  }
+          members: [T.userid()],
+          ratings: [rating_value()],
+          group_rating: rating_value(),
+          count: non_neg_integer()
+        }
   @type expanded_group_or_pair() :: expanded_group() | {expanded_group(), expanded_group()}
 
   @type algorithm_result :: map()

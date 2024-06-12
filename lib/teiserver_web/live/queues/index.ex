@@ -38,7 +38,7 @@ defmodule TeiserverWeb.Matchmaking.QueueLive.Index do
 
     queue_membership =
       Map.keys(db_queues)
-      |> Parallel.reject(fn queue_id ->
+      |> ParallelStream.reject(fn queue_id ->
         p = Matchmaking.get_queue_wait_pid(queue_id)
 
         if p != nil do
@@ -53,6 +53,7 @@ defmodule TeiserverWeb.Matchmaking.QueueLive.Index do
           true
         end
       end)
+      |> Enum.to_list()
 
     is_admin = allow?(socket.assigns[:current_user], "Admin")
 
@@ -206,7 +207,7 @@ defmodule TeiserverWeb.Matchmaking.QueueLive.Index do
         } = data,
         socket
       ) do
-    Logger.warn("index.ex Match ready")
+    Logger.warning("index.ex Match ready")
 
     {:noreply,
      socket

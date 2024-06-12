@@ -1,6 +1,5 @@
 defmodule Teiserver.Battle.Balance.SplitOneChevsTypes do
   @moduledoc false
-  # alias Teiserver.Battle.Balance.BalanceTypes, as: BT
 
   @type member :: %{
           rating: float(),
@@ -8,7 +7,7 @@ defmodule Teiserver.Battle.Balance.SplitOneChevsTypes do
           member_id: any()
         }
   @type team :: %{
-    members: [member],
-    team_id: integer()
-  }
+          members: [member],
+          team_id: integer()
+        }
 end

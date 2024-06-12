@@ -100,11 +100,14 @@ defmodule TeiserverWeb.Account.SessionController do
   end
 
   defp login_reply({:ok, user}, conn) do
+    cookies = Plug.Conn.fetch_cookies(conn, signed: ~w(_redirect_to)).cookies
+
     conn
     |> put_flash(:info, "Welcome back!")
     |> Guardian.Plug.sign_in(user)
     |> Guardian.Plug.remember_me(user)
-    |> redirect(to: "/")
+    |> Plug.Conn.delete_resp_cookie("_redirect_to", sign: true)
+    |> redirect(to: Map.get(cookies, "_redirect_to", "/"))
   end
 
   defp login_reply({:error, reason}, conn) do
@@ -196,12 +199,21 @@ defmodule TeiserverWeb.Account.SessionController do
         |> render("forgot_password.html")
 
       true ->
-        Account.Emails.password_reset(user)
-        |> Teiserver.Mailer.deliver_now()
+        case Teiserver.Account.Emails.send_password_reset(user) do
+          :ok ->
+            conn
+            |> put_flash(:success, "Password reset email sent out")
+            |> redirect(to: ~p"/login")
 
-        conn
-        |> put_flash(:success, "Password reset sent out")
-        |> redirect(to: "/login")
+          {:error, error} ->
+            Logger.error(
+              "Failed to send password reset email to user at #{user.email}: #{inspect(error)}"
+            )
+
+            conn
+            |> put_flash(:error, "Oops, something went wrong resetting the password")
+            |> redirect(to: ~p"/forgot_password")
+        end
     end
   end
 

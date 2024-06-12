@@ -147,18 +147,21 @@ defmodule Teiserver.Battle.MatchMonitorServer do
       [_all, username, event_type_name, game_time] ->
         userid = Account.get_userid_from_name(username)
 
-        if userid && CacheUser.is_bot?(userid) do
+        if userid && CacheUser.is_bot?(from_id) do
           match_id = Battle.get_match_id_from_userid(from_id)
 
           if match_id do
             game_time = int_parse(game_time)
             Telemetry.log_simple_match_event(userid, match_id, event_type_name, game_time)
-            Logger.info("match-event: Stored <#{username}> <#{event_type_name}> <#{game_time}> userid #{userid} match_id #{match_id}")
+
+            Logger.info(
+              "match-event: Stored <#{username}> <#{event_type_name}> <#{game_time}> userid #{userid} match_id #{match_id}"
+            )
           else
-            Logger.warn("match-event: Cannot get match_id of userid of #{username}")
+            Logger.warning("match-event: Cannot get match_id of userid of #{username}")
           end
         else
-          Logger.warn("match-event: Cannot get userid of #{username} or is not a bot")
+          Logger.warning("match-event: Cannot get userid of #{username} or is not a bot")
         end
 
       _ ->
@@ -242,7 +245,7 @@ defmodule Teiserver.Battle.MatchMonitorServer do
         end
 
       _ ->
-        Logger.warn("match-chat nomatch from: #{from_id}: match-chat #{data}")
+        Logger.warning("match-chat nomatch from: #{from_id}: match-chat #{data}")
     end
 
     {:noreply, state}
@@ -253,13 +256,14 @@ defmodule Teiserver.Battle.MatchMonitorServer do
       [_all, username, _user_num, to, msg] ->
         host = Client.get_client_by_id(from_id)
         user = CacheUser.get_user_by_name(username)
+
         if host == nil do
           Logger.error("No host found for from_id: #{from_id} for message #{to}:#{msg}")
+
           # Optionally, handle the case here, such as by sending a message back to the user or taking other corrective actions.
           # Just returning {:noreply, state} for now.
           {:noreply, state}
         else
-
           case to do
             "d" ->
               # We don't persist this as it's already persisted elsewhere
@@ -284,11 +288,12 @@ defmodule Teiserver.Battle.MatchMonitorServer do
                 {:liveview_lobby_chat, :say, user.id, "s: #{msg}"}
               )
           end
+
           {:noreply, state}
         end
 
       _ ->
-        Logger.warn("match-chat-name nomatch from: #{from_id}: match-chat [[#{data}]]")
+        Logger.warning("match-chat-name nomatch from: #{from_id}: match-chat [[#{data}]]")
     end
 
     {:noreply, state}
@@ -311,15 +316,15 @@ defmodule Teiserver.Battle.MatchMonitorServer do
                 handle_json_msg(data, from_id)
 
               _ ->
-                Logger.warn("AHM DM no catch, no json-decode - '#{contents_string}'")
+                Logger.warning("AHM DM no catch, no json-decode - '#{contents_string}'")
             end
 
           _ ->
-            Logger.warn("AHM DM no catch, no decompress - '#{compressed_contents}'")
+            Logger.warning("AHM DM no catch, no decompress - '#{compressed_contents}'")
         end
 
       _ ->
-        Logger.warn("AHM DM no catch, no base64 - '#{message}'")
+        Logger.warning("AHM DM no catch, no base64 - '#{message}'")
     end
 
     {:noreply, state}
@@ -327,7 +332,7 @@ defmodule Teiserver.Battle.MatchMonitorServer do
 
   # Catchall handle_info
   def handle_info(msg, state) do
-    Logger.warn(
+    Logger.warning(
       "Match monitor Server handle_info error. No handler for msg of #{Kernel.inspect(msg)}"
     )
 
@@ -337,7 +342,9 @@ defmodule Teiserver.Battle.MatchMonitorServer do
   defp handle_json_msg(%{"username" => username, "GPU" => _} = contents, from_id) do
     case CacheUser.get_user_by_name(username) do
       nil ->
-        Logger.warn("No username on handle_json_msg: #{username} - #{Kernel.inspect(contents)}")
+        Logger.warning(
+          "No username on handle_json_msg: #{username} - #{Kernel.inspect(contents)}"
+        )
 
         :ok
 
@@ -367,7 +374,7 @@ defmodule Teiserver.Battle.MatchMonitorServer do
   end
 
   defp handle_json_msg(contents, _from_id) do
-    Logger.warn("No catch on handle_json_msg: #{Kernel.inspect(contents)}")
+    Logger.warning("No catch on handle_json_msg: #{Kernel.inspect(contents)}")
     :ok
   end
 

@@ -2,7 +2,7 @@ defmodule Teiserver.Battle.BalanceLib do
   @moduledoc """
   A set of functions related to balance, if you are looking to see how balance is implemented this is the place. Ratings are calculated via Teiserver.Game.MatchRatingLib and are used here. Please note ratings and balance are two very different things and complaints about imbalanced games need to be correct in addressing balance vs ratings.
   """
-  alias Teiserver.{Account, Config}
+  alias Teiserver.{Account, Config, CacheUser}
   alias Teiserver.Data.Types, as: T
   alias Teiserver.Battle.Balance.BalanceTypes, as: BT
   alias Teiserver.Game.MatchRatingLib
@@ -27,6 +27,8 @@ defmodule Teiserver.Battle.BalanceLib do
   # which one will get to pick first
   @shuffle_first_pick true
 
+  @default_balance_algorithm "loser_picks"
+
   @spec defaults() :: map()
   def defaults() do
     %{
@@ -38,6 +40,11 @@ defmodule Teiserver.Battle.BalanceLib do
       fuzz_multiplier: @fuzz_multiplier,
       shuffle_first_pick: @shuffle_first_pick
     }
+  end
+
+  defp get_default_algorithm() do
+    # For now it's a constant but this could be moved to a configurable value
+    @default_balance_algorithm
   end
 
   @spec algorithm_modules() :: %{String.t() => module}
@@ -81,6 +88,12 @@ defmodule Teiserver.Battle.BalanceLib do
     mean_diff_max: the maximum difference in mean between the party and paired parties
     stddev_diff_max: the maximum difference in stddev between the party and paired parties
   """
+  @spec create_balance([BT.player_group()], non_neg_integer) :: map
+  def create_balance(groups, team_count) do
+    # This method sets default opts (and makes some warnings go away)
+    create_balance(groups, team_count, [])
+  end
+
   @spec create_balance([BT.player_group()], non_neg_integer, list) :: map
   def create_balance([], _team_count, _opts) do
     %{
@@ -93,12 +106,14 @@ defmodule Teiserver.Battle.BalanceLib do
       team_players: %{},
       team_sizes: %{},
       means: %{},
-      stdevs: %{}
+      stdevs: %{},
+      has_parties?: false
     }
   end
 
   def create_balance(groups, team_count, opts) do
     start_time = System.system_time(:microsecond)
+    groups = standardise_groups(groups)
 
     # We perform all our group calculations here and assign each group
     # an ID that's used purely for this run of balance
@@ -113,6 +128,15 @@ defmodule Teiserver.Battle.BalanceLib do
           |> Enum.map(fn x ->
             cond do
               Map.has_key?(x, :rank) -> x.rank
+              true -> 0
+            end
+          end)
+
+        rank_times =
+          Map.values(members)
+          |> Enum.map(fn x ->
+            cond do
+              Map.has_key?(x, :rank_time) -> x.rank_time
               true -> 0
             end
           end)
@@ -132,15 +156,18 @@ defmodule Teiserver.Battle.BalanceLib do
           ranks: ranks,
           names: names,
           group_rating: Enum.sum(ratings),
-          count: Enum.count(ratings)
+          count: Enum.count(ratings),
+          rank_times: rank_times
         }
       end)
 
+    algo_name = opts[:algorithm] || get_default_algorithm()
+
     # Now we pass this to the algorithm and it does the rest!
     balance_result =
-      case algorithm_modules()[opts[:algorithm] || "loser_picks"] do
+      case algorithm_modules()[algo_name] do
         nil ->
-          raise "No balance module by the name of '#{opts[:algorithm] || "loser_picks"}'"
+          raise "No balance module by the name of '#{algo_name}'"
 
         m ->
           m.perform(expanded_groups, team_count, opts)
@@ -154,12 +181,37 @@ defmodule Teiserver.Battle.BalanceLib do
     |> Map.put(:time_taken, System.system_time(:microsecond) - start_time)
   end
 
+  @doc """
+  Sometimes groups have missing data so we need to refetch it.
+  If we go through balancer_server then all the required data should be there
+  """
+  def standardise_groups(groups) do
+    groups
+    |> Enum.map(fn group ->
+      # Iterate over our map
+      Map.new(group, fn {user_id, value} ->
+        cond do
+          is_number(value) -> {user_id, get_user_rating_rank_old(user_id, value)}
+          true -> {user_id, value}
+        end
+      end)
+    end)
+  end
+
   # Removes various keys we don't care about
   defp cleanup_result(result) do
     Map.take(
       result,
-      ~w(team_groups team_players ratings captains team_sizes deviation means stdevs logs)a
+      ~w(team_groups team_players ratings captains team_sizes deviation means stdevs logs has_parties?)a
     )
+  end
+
+  # Only take keys we need
+  defp clean_groups(groups) do
+    groups
+    |> Enum.map(fn x ->
+      Map.take(x, ~w(members count group_rating ratings)a)
+    end)
   end
 
   # Take the balance result and add some extra fields to make using it easier
@@ -172,7 +224,7 @@ defmodule Teiserver.Battle.BalanceLib do
         true ->
           balance_result.teams
           |> Map.new(fn {team_id, groups} ->
-            {team_id, Enum.reverse(groups)}
+            {team_id, Enum.reverse(clean_groups(groups))}
           end)
       end
 
@@ -195,7 +247,8 @@ defmodule Teiserver.Battle.BalanceLib do
 
     Map.merge(balance_result, %{
       team_groups: team_groups,
-      team_players: team_players
+      team_players: team_players,
+      has_parties?: balanced_teams_has_parties?(team_groups)
     })
   end
 
@@ -287,13 +340,14 @@ defmodule Teiserver.Battle.BalanceLib do
     case hd(found_groups) do
       :no_possible_combinations ->
         extra_solos =
-          Enum.zip(group.members, group.ratings)
-          |> Enum.map(fn {userid, rating} ->
+          Enum.zip([group.members, group.ratings, group.names])
+          |> Enum.map(fn {userid, rating, name} ->
             %{
               count: 1,
               group_rating: rating,
               members: [userid],
-              ratings: [rating]
+              ratings: [rating],
+              names: [name]
             }
           end)
 
@@ -314,13 +368,14 @@ defmodule Teiserver.Battle.BalanceLib do
 
       :no_possible_players ->
         extra_solos =
-          Enum.zip(group.members, group.ratings)
-          |> Enum.map(fn {userid, rating} ->
+          Enum.zip([group.members, group.ratings, group.names])
+          |> Enum.map(fn {userid, rating, name} ->
             %{
               count: 1,
               group_rating: rating,
               members: [userid],
-              ratings: [rating]
+              ratings: [rating],
+              names: [name]
             }
           end)
 
@@ -532,18 +587,10 @@ defmodule Teiserver.Battle.BalanceLib do
     get_user_rating_value(userid, rating_type_id)
   end
 
-
-  # Used to get the rating value of the user for internal balance purposes which might be
-  # different from public/reporting
   @spec get_user_balance_rating_value(T.userid(), String.t() | non_neg_integer()) ::
           BT.rating_value()
   defp get_user_balance_rating_value(userid, rating_type_id) when is_integer(rating_type_id) do
-    real_rating = get_user_rating_value(userid, rating_type_id)
-
-    stats = Account.get_user_stat_data(userid)
-    adjustment = int_parse(stats["os_global_adjust"])
-
-    real_rating + adjustment
+    get_user_rating_value(userid, rating_type_id)
   end
 
   defp get_user_balance_rating_value(_userid, nil), do: nil
@@ -559,18 +606,39 @@ defmodule Teiserver.Battle.BalanceLib do
 
   def get_user_rating_rank(userid, rating_type, fuzz_multiplier) do
     # This call will go to db or cache
-    # The cache for ratings is :teiserver_user_stat_cache
+    # The cache for ratings is :teiserver_user_ratings
     # which has an expiry of 60s
     # See application.ex for cache settings
     rating_type_id = MatchRatingLib.rating_type_name_lookup()[rating_type]
     rating = get_user_balance_rating_value(userid, rating_type_id)
     rating = fuzz_rating(rating, fuzz_multiplier)
+
+    # Get stats data
+    # Potentially adjust ratings based on os_global_adjust
+    # Also fetch chevron_hours (rank_time)
+    stats = Account.get_user_stat_data(userid)
+    adjustment = int_parse(stats["os_global_adjust"])
+    rating = rating + adjustment
+    rank_time = CacheUser.rank_time(stats)
+
     # This call will go to db or cache
     # The cache for users is :users
     # which is permanent (and would be instantiated on login)
     # See application.ex for cache settings
+
     %{rank: rank, name: name} = Account.get_user_by_id(userid)
-    %{rating: rating, rank: rank, name: name}
+    %{rating: rating, rank: rank, name: name, rank_time: rank_time}
+  end
+
+  @doc """
+  This is used by some screens to calculate a theoretical balance based on old ratings
+  """
+  def get_user_rating_rank_old(userid, rating_value) do
+    stats = Account.get_user_stat_data(userid)
+    rank_time = CacheUser.rank_time(stats)
+
+    %{rank: rank, name: name} = Account.get_user_by_id(userid)
+    %{rating: rating_value, rank: rank, name: name, rank_time: rank_time}
   end
 
   defp fuzz_rating(rating, multiplier) do
@@ -801,5 +869,31 @@ defmodule Teiserver.Battle.BalanceLib do
     else
       for(y <- make_combinations(n - x.count, xs), do: [x | y]) ++ make_combinations(n, xs)
     end
+  end
+
+  @doc """
+  Can be called to detect if a balance result has parties
+  If the result has no parties we do not need to check team deviation
+  """
+  def balanced_teams_has_parties?(team_groups) do
+    Enum.reduce_while(team_groups, false, fn {_key, team}, _acc ->
+      case team_has_parties?(team) do
+        true -> {:halt, true}
+        false -> {:cont, false}
+      end
+    end)
+  end
+
+  @spec team_has_parties?([BT.group()]) :: boolean()
+  def team_has_parties?(team) do
+    Enum.reduce_while(team, false, fn x, _acc ->
+      group_count = x[:count]
+
+      if group_count > 1 do
+        {:halt, true}
+      else
+        {:cont, false}
+      end
+    end)
   end
 end

@@ -296,9 +296,8 @@ defmodule Teiserver.CacheUser do
               :no_verify ->
                 verify_user(get_user_by_id(user.id))
 
-              {:ok, _} ->
+              {:ok, _, _} ->
                 :ok
-                # Logger.error("Email sent, response of #{Kernel.inspect response}")
             end
         end
 
@@ -339,7 +338,7 @@ defmodule Teiserver.CacheUser do
               verify_user(get_user_by_id(user.id))
               :ok
 
-            {:ok, _} ->
+            {:ok, _, _} ->
               :ok
           end
         end
@@ -500,18 +499,18 @@ defmodule Teiserver.CacheUser do
     :ok
   end
 
-  def request_password_reset(user) do
-    db_user = Account.get_user!(user.id)
-
-    Teiserver.Account.Emails.password_reset(db_user)
-    |> Teiserver.Mailer.deliver_now()
-  end
-
-  def request_email_change(nil, _), do: nil
+  @spec request_email_change(T.user() | nil, String.t()) :: {:ok, T.user()} | {:error, String.t()}
+  def request_email_change(nil, _), do: {:error, "no user"}
 
   def request_email_change(user, new_email) do
-    code = :rand.uniform(899_999) + 100_000
-    update_user(%{user | email_change_code: ["#{code}", new_email]})
+    case get_user_by_email(new_email) do
+      nil ->
+        code = :rand.uniform(899_999) + 100_000
+        {:ok, update_user(%{user | email_change_code: ["#{code}", new_email]})}
+
+      _ ->
+        {:error, "Email already in use"}
+    end
   end
 
   @spec change_email(T.user(), String.t()) :: T.user()
@@ -567,6 +566,7 @@ defmodule Teiserver.CacheUser do
   def send_direct_message(from_id, to_id, "!joinas" <> s),
     do: send_direct_message(from_id, to_id, "!cv joinas" <> s)
 
+  @spec send_direct_message(T.userid(), T.userid(), list) :: :ok
   def send_direct_message(sender_id, to_id, message_parts) when is_list(message_parts) do
     sender = get_user_by_id(sender_id)
     msg_str = Enum.join(message_parts, "\n")
@@ -1258,20 +1258,37 @@ defmodule Teiserver.CacheUser do
   def is_moderator?(%{roles: roles}), do: Enum.member?(roles, "Moderator")
   def is_moderator?(_), do: false
 
+  @spec is_contributor?(T.userid() | T.user()) :: boolean()
+  def is_contributor?(nil), do: true
+  def is_contributor?(userid) when is_integer(userid), do: is_contributor?(get_user_by_id(userid))
+  def is_contributor?(%{roles: roles}), do: Enum.member?(roles, "Contributor")
+  def is_contributor?(_), do: false
+
   @spec is_verified?(T.userid() | T.user()) :: boolean()
   def is_verified?(nil), do: true
   def is_verified?(userid) when is_integer(userid), do: is_verified?(get_user_by_id(userid))
   def is_verified?(%{roles: roles}), do: Enum.member?(roles, "Verified")
   def is_verified?(_), do: false
 
-  @spec rank_time(T.userid()) :: non_neg_integer()
-  def rank_time(userid) do
+  @spec rank_time(T.userid() | map()) :: non_neg_integer()
+  def rank_time(userid) when is_number(userid) do
     stats = Account.get_user_stat(userid) || %{data: %{}}
+    data = Map.get(stats, :data, %{})
 
+    rank_time(data)
+  end
+
+  @doc """
+  Get data from stats table (data column) to calculate rank time.
+  This is used to calculate chevrons.
+  """
+  def rank_time(stats_data) when is_map(stats_data) do
     ingame_minutes =
-      (stats.data["player_minutes"] || 0) + (stats.data["spectator_minutes"] || 0) * 0.5
+      (stats_data["player_minutes"] || 0) + (stats_data["spectator_minutes"] || 0) * 0.5
 
-    round(ingame_minutes / 60)
+    # Hours are rounded down which helps to determine if a user has hit a
+    # chevron hours threshold. So a user with 4.9 hours is still chevron 1 or rank 0
+    trunc(ingame_minutes / 60)
   end
 
   # Based on actual ingame time
@@ -1304,13 +1321,15 @@ defmodule Teiserver.CacheUser do
   def calculate_rank(userid, "Role") do
     ingame_hours = rank_time(userid)
 
+    # Thresholds should match what is on the website:
+    # https://www.beyondallreason.info/guide/rating-and-lobby-balance#rank-icons
     cond do
       has_any_role?(userid, ~w(Core Contributor)) -> 6
-      ingame_hours > 1000 -> 5
-      ingame_hours > 250 -> 4
-      ingame_hours > 100 -> 3
-      ingame_hours > 15 -> 2
-      ingame_hours > 5 -> 1
+      ingame_hours >= 1000 -> 5
+      ingame_hours >= 250 -> 4
+      ingame_hours >= 100 -> 3
+      ingame_hours >= 15 -> 2
+      ingame_hours >= 5 -> 1
       true -> 0
     end
   end

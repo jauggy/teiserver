@@ -2,7 +2,7 @@ defmodule Teiserver.SpringAuthTest do
   use Teiserver.ServerCase, async: false
   require Logger
   alias Teiserver.BitParse
-  alias Teiserver.{User, Account, Client}
+  alias Teiserver.{CacheUser, Account, Client}
   alias Teiserver.Account.UserCacheLib
   import Teiserver.Helper.NumberHelper, only: [int_parse: 1]
 
@@ -85,7 +85,7 @@ defmodule Teiserver.SpringAuthTest do
     reply = _recv_raw(socket)
     assert reply == "SERVERMSG Current password entered incorrectly\n"
     user = UserCacheLib.get_user_by_name(user.name)
-    assert User.test_password("X03MO1qnZdYdgyfeuILPmQ==", user.password_hash)
+    assert CacheUser.test_password("X03MO1qnZdYdgyfeuILPmQ==", user.password_hash)
 
     # Change it correctly
     _send_raw(socket, "CHANGEPASSWORD X03MO1qnZdYdgyfeuILPmQ== new_pass\n")
@@ -93,7 +93,7 @@ defmodule Teiserver.SpringAuthTest do
     reply = _recv_raw(socket)
     assert reply == "SERVERMSG Password changed, you will need to use it next time you login\n"
     user = UserCacheLib.get_user_by_name(user.name)
-    assert User.test_password("new_pass", user.password_hash)
+    assert CacheUser.test_password("new_pass", user.password_hash)
 
     # Test no match
     _send_raw(socket, "CHANGEPASSWORD nomatchname\n")
@@ -137,6 +137,7 @@ defmodule Teiserver.SpringAuthTest do
 
     # Now lets ignore them
     _send_raw(socket1, "IGNORE userName=#{user2.name}\n")
+    _send_raw(socket1, "IGNORELIST\n")
     reply = _recv_raw(socket1)
     assert reply == "IGNORELISTBEGIN
 IGNORELIST userName=#{user2.name}
@@ -149,6 +150,7 @@ IGNORELISTEND\n"
 
     # Now unignore them
     _send_raw(socket1, "UNIGNORE userName=#{user2.name}\n")
+    _send_raw(socket1, "IGNORELIST\n")
     reply = _recv_raw(socket1)
     assert reply == "IGNORELISTBEGIN
 IGNORELISTEND\n"
@@ -194,49 +196,38 @@ IGNORELISTEND\n"
 
     # Now we send the friend request
     _send_raw(socket2, "FRIENDREQUEST userName=#{user.name}\n")
+
+    # and the target receives it
     reply = _recv_raw(socket1)
-    assert reply == "FRIENDREQUESTLISTBEGIN
-FRIENDREQUESTLIST userName=#{user2.name}
-FRIENDREQUESTLISTEND\n"
+    assert reply == "s.user.new_incoming_friend_request #{user2.id}\n"
 
     # Accept the friend request
     _send_raw(socket1, "ACCEPTFRIENDREQUEST userName=#{user2.name}\n")
-    reply = _recv_raw(socket1)
-    assert reply == "FRIENDLISTBEGIN
-FRIENDLIST userName=#{user2.name}
-FRIENDLISTEND
-FRIENDREQUESTLISTBEGIN
-FRIENDREQUESTLISTEND\n"
+    # there's no expected response for this command
 
     reply = _recv_raw(socket2)
-    assert reply == "FRIENDLISTBEGIN
-FRIENDLIST userName=#{user.name}
-FRIENDLISTEND\n"
+    assert reply == "s.user.friend_request_accepted #{user.id}\n"
 
     # Change of plan, remove them
     _send_raw(socket1, "UNFRIEND userName=#{user2.name}\n")
     reply = _recv_raw(socket1)
-    assert reply == "FRIENDLISTBEGIN
-FRIENDLISTEND\n"
+    assert reply == "s.user.friend_deleted #{user2.id}\n"
 
     reply = _recv_raw(socket2)
-    assert reply == "FRIENDLISTBEGIN
-FRIENDLISTEND\n"
+    assert reply == "s.user.friend_deleted #{user.id}\n"
 
     # Request a friend again so we can decline it
     _send_raw(socket2, "FRIENDREQUEST userName=#{user.name}\n")
     reply = _recv_raw(socket1)
-    assert reply == "FRIENDREQUESTLISTBEGIN
-FRIENDREQUESTLIST userName=#{user2.name}
-FRIENDREQUESTLISTEND\n"
+    assert reply == "s.user.new_incoming_friend_request #{user2.id}\n"
 
     # Decline the friend request
     _send_raw(socket1, "DECLINEFRIENDREQUEST userName=#{user2.name}\n")
-    reply = _recv_raw(socket1)
-    assert reply == "FRIENDREQUESTLISTBEGIN
-FRIENDREQUESTLISTEND\n"
-
+    # the other users receive the notice that it was declined
     reply = _recv_raw(socket2)
+    assert reply == "s.user.friend_request_declined #{user.id}\n"
+
+    reply = _recv_raw(socket1)
     assert reply == :timeout
   end
 
@@ -291,6 +282,9 @@ CLIENTS test_room #{user.name}\n"
   test "JOINBATTLE, SAYBATTLE, MYBATTLESTATUS, LEAVEBATTLE", %{socket: socket1, user: user1} do
     hash = "-1540855590"
 
+    # Give user Bot role so they can manage battle
+    UserCacheLib.update_user(%{user1 | roles: ["Bot" | user1.roles]}, persist: false)
+
     _send_raw(
       socket1,
       "OPENBATTLE 0 0 empty 52200 16 #{hash} 0 1565299817 spring\t104.0.1-1784-gf6173b4 BAR\tauth_joinbattle_test\tEU - 00\tBeyond All Reason test-15658-85bf66d\n"
@@ -338,14 +332,17 @@ CLIENTS test_room #{user.name}\n"
       host_bstatus,
       # bstatus,
       request,
+      client_status,
       ""
     ] = reply
 
     assert joinbattle == "JOINBATTLE #{lobby_id} #{hash}"
     assert joinedbattle == "JOINEDBATTLE #{lobby_id} #{user2.name} sPassword"
-    assert tags =~ "SETSCRIPTTAGS server/match/uuid="
-    assert host_bstatus == "CLIENTBATTLESTATUS #{user1.name} 8388608 0"
+    assert tags =~ ~r"SETSCRIPTTAGS .*server/match/uuid="
+    # the \d+ is the team colour
+    assert host_bstatus =~ ~r"CLIENTBATTLESTATUS #{user1.name} \d+ 0"
     assert request == "REQUESTBATTLESTATUS"
+    assert client_status == "CLIENTSTATUS #{user2.name} 0"
 
     _send_raw(socket2, "SAYBATTLE Hello there!\n")
     reply = _recv_raw(socket2)
@@ -353,7 +350,7 @@ CLIENTS test_room #{user.name}\n"
 
     _send_raw(socket2, "MYBATTLESTATUS 12 0\n")
     reply = _recv_raw(socket2)
-    assert reply == "CLIENTBATTLESTATUS #{user2.name} 8388620 0\n"
+    assert reply =~ ~r"CLIENTBATTLESTATUS #{user2.name} \d+ 0\n"
 
     # SAYBATTLEPRIVATEEX
     _send_raw(socket1, "SAYBATTLEPRIVATEEX #{user2.name} This is a test priv battle msg\n")
@@ -507,7 +504,9 @@ CLIENTS test_room #{user.name}\n"
     assert accepted == "DENIED Flood protection - Please wait 20 seconds and try again"
 
     # Un-flood them
-    User.set_flood_level(userid, 0)
+    CacheUser.set_flood_level(userid, 0)
+    # And re-verify them
+    user.id |> Teiserver.CacheUser.get_user_by_id() |> Teiserver.CacheUser.verify_user()
 
     # Now they can log in again
     _send_raw(
@@ -561,13 +560,22 @@ CLIENTS test_room #{user.name}\n"
     assert new_user.email_change_code == [nil, nil]
   end
 
+  test "CHANGEEMAIL to email already taken", %{socket: socket, user: user} do
+    other_user = Teiserver.TeiserverTestLib.new_user()
+
+    # Make the request
+    _send_raw(socket, "CHANGEEMAILREQUEST #{other_user.email}\n")
+    reply = _recv_raw(socket)
+    assert reply == "CHANGEEMAILREQUESTDENIED Email already in use\n"
+  end
+
   test "CREATEBOTACCOUNT - no mod", %{socket: socket, user: user} do
     _send_raw(socket, "CREATEBOTACCOUNT test_bot_account_no_mod #{user.name}\n")
     reply = _recv_raw(socket)
     assert reply == "SERVERMSG You do not have permission to execute that command\n"
 
     # Give mod access, recache the user
-    UserCacheLib.update_user(%{user | moderator: true}, persist: false)
+    UserCacheLib.update_user(%{user | roles: ["Moderator" | user.roles]}, persist: false)
     :timer.sleep(100)
 
     _send_raw(socket, "CREATEBOTACCOUNT test_bot_account #{user.name}\n")
@@ -619,8 +627,8 @@ CLIENTS test_room #{user.name}\n"
   #   assert Enum.count(Account.list_reports(search: [filter: {"target", target_user.id}])) == 2
 
   #   # Reporting a friend
-  #   User.create_friend_request(user.id, target_user.id)
-  #   User.accept_friend_request(user.id, target_user.id)
+  #   CacheUser.create_friend_request(user.id, target_user.id)
+  #   CacheUser.accept_friend_request(user.id, target_user.id)
 
   #   _send_raw(socket, "c.moderation.report_user #{target_user.name}\tlocation_type\t123\treason with spaces\n")
   #   reply = _recv_raw(socket)
@@ -641,7 +649,7 @@ CLIENTS test_room #{user.name}\n"
 
   test "Bad id ADDUSER", %{user: user, socket: socket} do
     {:ok, bad_user} =
-      User.user_register_params_with_md5(
+      CacheUser.user_register_params_with_md5(
         "test_user_bad_id",
         "test_user_bad_id@email.com",
         "X03MO1qnZdYdgyfeuILPmQ=="
@@ -651,10 +659,10 @@ CLIENTS test_room #{user.name}\n"
     bad_user
     |> UserCacheLib.convert_user()
     |> UserCacheLib.add_user()
-    |> User.verify_user()
+    |> CacheUser.verify_user()
 
     # Need to add it as a client for the :add_user command to work
-    Client.login(User.get_user_by_id(bad_user.id), :spring, "127.0.0.1")
+    Client.login(CacheUser.get_user_by_id(bad_user.id), :spring, "127.0.0.1")
 
     # Now see what happens when we add user
     pid = Client.get_client_by_id(user.id).tcp_pid
@@ -678,7 +686,7 @@ CLIENTS test_room #{user.name}\n"
     reply = _recv_raw(socket)
     assert reply == :timeout
 
-    UserCacheLib.update_user(%{user | moderator: true}, persist: false)
+    UserCacheLib.update_user(%{user | roles: ["Moderator" | user.roles]}, persist: false)
     :timer.sleep(500)
     _recv_until(socket)
 
@@ -697,7 +705,7 @@ CLIENTS test_room #{user.name}\n"
     reply = _recv_raw(socket)
     assert reply == :timeout
 
-    UserCacheLib.update_user(%{user | moderator: true}, persist: false)
+    UserCacheLib.update_user(%{user | roles: ["Moderator" | user.roles]}, persist: false)
     :timer.sleep(500)
     _recv_until(socket)
 

@@ -13,6 +13,9 @@ defmodule Teiserver.Battle.Balance.SplitOneChevs do
   """
   alias Teiserver.Battle.Balance.SplitOneChevsTypes, as: ST
   alias Teiserver.Battle.Balance.BalanceTypes, as: BT
+  alias Teiserver.Battle.Balance.ProvisionalRatingLib
+
+  @splitter "---------------------------"
 
   @doc """
   Main entry point used by balance_lib
@@ -20,6 +23,9 @@ defmodule Teiserver.Battle.Balance.SplitOneChevs do
   """
   @spec perform([BT.expanded_group()], non_neg_integer(), list()) :: any()
   def perform(expanded_group, team_count, _opts \\ []) do
+    # Apply adjusted ratings
+    expanded_group = ProvisionalRatingLib.apply_provisional_ratings(expanded_group)
+
     members = flatten_members(expanded_group) |> sort_members()
     %{teams: teams, logs: logs} = assign_teams(members, team_count)
     standardise_result(teams, logs)
@@ -52,6 +58,16 @@ defmodule Teiserver.Battle.Balance.SplitOneChevs do
     |> List.flatten()
   end
 
+  defp round_rating(rating_value) when is_float(rating_value) do
+    rating_value
+    |> Decimal.from_float()
+    |> Decimal.round(1)
+  end
+
+  defp round_rating(rating_value) when is_integer(rating_value) do
+    rating_value
+  end
+
   @doc """
   Assigns teams using algorithm defined in moduledoc
   See split_one_chevs_internal_test.exs for sample input
@@ -59,14 +75,21 @@ defmodule Teiserver.Battle.Balance.SplitOneChevs do
   def assign_teams(member_list, number_of_teams) do
     default_acc = %{
       teams: create_empty_teams(number_of_teams),
-      logs: ["Begin split_one_chevs balance"]
+      logs: [
+        "Algorithm: split_one_chevs",
+        @splitter,
+        "Your team will try and avoid picking one chevs and prefer picking players with higher Adjusted Rating. Adjusted Rating starts at 0 and converges towards OS over time. Once a player hits three chevrons, Adjusted Rating just equals OS.",
+        @splitter
+      ]
     }
 
     Enum.reduce(member_list, default_acc, fn x, acc ->
       picking_team = get_picking_team(acc.teams)
       update_picking_team = Map.merge(picking_team, %{members: [x | picking_team.members]})
       username = x.name
-      new_log = "#{username} (Chev: #{x.rank + 1}) picked for Team #{picking_team.team_id}"
+
+      new_log =
+        "#{username} (#{round_rating(x.rating)}, Chev: #{x.rank + 1}) picked for Team #{picking_team.team_id}"
 
       %{
         teams: [update_picking_team | get_non_picking_teams(acc.teams, picking_team)],

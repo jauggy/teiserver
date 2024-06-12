@@ -25,7 +25,10 @@ defmodule Teiserver.Battle.SeasonalUncertaintyResetTask do
     )
   end
 
-  defp reset_rating(existing, new_uncertainty, new_last_updated) do
+  defp reset_rating(existing, _new_uncertainty, new_last_updated) do
+    # Use the greater of the existing uncertainty or the minimum value (5.0)
+    new_uncertainty = max(existing.uncertainty, 5.0)
+
     new_rating_value = BalanceLib.calculate_rating_value(existing.skill, new_uncertainty)
 
     new_leaderboard_rating =
