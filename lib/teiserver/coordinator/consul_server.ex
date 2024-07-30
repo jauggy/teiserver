@@ -809,17 +809,11 @@ defmodule Teiserver.Coordinator.ConsulServer do
     avoid_status = Account.check_avoid_status(user.id, player_ids)
 
     boss_avoid_status =
-      case is_custom_preset?(state) do
-        true ->
-          state.host_bosses
-          |> Stream.map(fn boss_id ->
-            Account.does_a_avoid_b?(boss_id, user.id)
-          end)
-          |> Enum.any?()
-
-        false ->
-          false
-      end
+      state.host_bosses
+      |> Stream.map(fn boss_id ->
+        Account.does_a_avoid_b?(boss_id, user.id)
+      end)
+      |> Enum.any?()
 
     rating_check_result = LobbyRestrictions.check_rating_to_play(userid, state)
 
@@ -867,13 +861,6 @@ defmodule Teiserver.Coordinator.ConsulServer do
 
       true ->
         true
-    end
-  end
-
-  defp is_custom_preset?(state) do
-    case state.host_preset do
-      nil -> false
-      _ -> Regex.match?(~r/custom/i, state.host_preset)
     end
   end
 
@@ -946,17 +933,11 @@ defmodule Teiserver.Coordinator.ConsulServer do
     block_status = Account.check_block_status(userid, player_ids)
 
     boss_avoid_status =
-      case is_custom_preset?(state) do
-        true ->
-          state.host_bosses
-          |> Stream.map(fn boss_id ->
-            Account.does_a_avoid_b?(boss_id, userid)
-          end)
-          |> Enum.any?()
-
-        false ->
-          false
-      end
+      state.host_bosses
+      |> Stream.map(fn boss_id ->
+        Account.does_a_avoid_b?(boss_id, user.id)
+      end)
+      |> Enum.any?()
 
     cond do
       client == nil ->

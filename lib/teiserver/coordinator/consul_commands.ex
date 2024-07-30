@@ -68,7 +68,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
             |> Enum.map_join(", ", fn b -> CacheUser.get_username(b) end)
 
           if state.host_preset != nil && Regex.match?(~r/custom/i, state.host_preset) do
-            "Boss: #{boss_names} (Custom preset: No votes allowed)"
+            "Boss: #{boss_names} (Custom preset: Lobby voting disabled)"
           else
             "Boss: #{boss_names}"
           end

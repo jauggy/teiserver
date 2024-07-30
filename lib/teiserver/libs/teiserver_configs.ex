@@ -399,7 +399,7 @@ defmodule Teiserver.TeiserverConfigs do
       permissions: ["Admin"],
       description:
         "The raw number of players who would need to avoid someone to prevent them becoming a player",
-      default: 8
+      default: 6
     })
 
     add_site_config_type(%{
