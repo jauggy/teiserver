@@ -273,13 +273,13 @@ defmodule Teiserver.Game.BalancerServer do
       lobby_id: lobby_id,
       host_id: founder_id,
       hashes: %{},
-      algorithm: "loser_picks",
+      algorithm: BalanceLib.get_default_algorithm(),
       last_balance_hash: nil
     })
   end
 
   @impl true
-  @spec init(Map.t()) :: {:ok, T.balance_server_state()}
+  @spec init(map()) :: {:ok, T.balance_server_state()}
   def init(opts) do
     lobby_id = opts[:lobby_id]
     Logger.metadata(request_id: "BalancerServer##{opts.lobby_id}")

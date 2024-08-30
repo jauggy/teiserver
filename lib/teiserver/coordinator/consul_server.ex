@@ -32,7 +32,6 @@ defmodule Teiserver.Coordinator.ConsulServer do
   @admin_commands ~w(playerlimit)
 
   # @handled_by_lobby ~w(explain)
-  @default_balance_algorithm "loser_picks"
   @splitter "########################################"
 
   @afk_check_duration 40_000
@@ -390,7 +389,7 @@ defmodule Teiserver.Coordinator.ConsulServer do
           maximum_rating_to_play: LobbyRestrictions.rating_upper_bound(),
           minimum_rank_to_play: 0,
           maximum_rank_to_play: LobbyRestrictions.rank_upper_bound(),
-          balance_algorithm: @default_balance_algorithm,
+          balance_algorithm: BalanceLib.get_default_algorithm(),
           welcome_message: nil
         })
 
@@ -615,13 +614,13 @@ defmodule Teiserver.Coordinator.ConsulServer do
 
   # Says if a status change is allowed to happen. If it is then an allowed status
   # is included with it.
-  @spec request_user_change_status(T.client(), map()) :: {boolean, Map.t() | nil}
+  @spec request_user_change_status(T.client(), map()) :: {boolean, map() | nil}
   defp request_user_change_status(client, state) do
     existing = Client.get_client_by_id(client.userid)
     request_user_change_status(client, existing, state)
   end
 
-  @spec request_user_change_status(T.client(), T.client(), map()) :: {boolean, Map.t() | nil}
+  @spec request_user_change_status(T.client(), T.client(), map()) :: {boolean, map() | nil}
   # defp request_user_change_status(new_client, %{moderator: true, ready: false}, _state), do: {true, %{new_client | player: false}}
   # defp request_user_change_status(new_client, %{moderator: true}, _state), do: {true, new_client}
   defp request_user_change_status(_new_client, nil, _state), do: {false, nil}
@@ -820,13 +819,11 @@ defmodule Teiserver.Coordinator.ConsulServer do
 
     cond do
       rating_check_result != :ok ->
-        # Send message
         {_, msg} = rating_check_result
         CacheUser.send_direct_message(get_coordinator_userid(), userid, msg)
         false
 
       rank_check_result != :ok ->
-        # Send message
         {_, msg} = rank_check_result
         CacheUser.send_direct_message(get_coordinator_userid(), userid, msg)
         false
@@ -848,13 +845,6 @@ defmodule Teiserver.Coordinator.ConsulServer do
         match_id = Battle.get_lobby_match_id(state.lobby_id)
         Telemetry.log_simple_lobby_event(user.id, match_id, "play_refused.avoided")
         msg = "You are avoided by too many players in this lobby"
-        CacheUser.send_direct_message(get_coordinator_userid(), userid, msg)
-        false
-
-      boss_avoid_status == true ->
-        match_id = Battle.get_lobby_match_id(state.lobby_id)
-        Telemetry.log_simple_lobby_event(user.id, match_id, "play_refused.boss_avoided")
-        msg = "You are avoided by the boss of this lobby"
         CacheUser.send_direct_message(get_coordinator_userid(), userid, msg)
         false
 
@@ -905,7 +895,7 @@ defmodule Teiserver.Coordinator.ConsulServer do
     end
   end
 
-  @spec allow_join(T.userid(), Map.t()) :: {true, nil} | {false, String.t()}
+  @spec allow_join(T.userid(), map()) :: {true, nil} | {false, String.t()}
   defp allow_join(userid, state) do
     client = Client.get_client_by_id(userid)
     {ban_state, reason} = check_ban_state(userid, state)
@@ -968,10 +958,6 @@ defmodule Teiserver.Coordinator.ConsulServer do
         Telemetry.log_simple_lobby_event(userid, match_id, "join_refused.blocked")
         {false, "You are blocked by too many players in this lobby"}
 
-      boss_avoid_status == true ->
-        Telemetry.log_simple_lobby_event(userid, match_id, "join_refused.boss_blocked")
-        {false, "You are blocked by the boss of this lobby"}
-
       Enum.member?(state.approved_users, userid) ->
         {true, :override_approve}
 
@@ -1006,7 +992,7 @@ defmodule Teiserver.Coordinator.ConsulServer do
     end
   end
 
-  @spec allow_command?(Map.t(), Map.t()) :: boolean()
+  @spec allow_command?(map(), map()) :: boolean()
   defp allow_command?(%{senderid: senderid} = cmd, state) do
     client = Client.get_client_by_id(senderid)
     user = Account.get_user_by_id(senderid)
@@ -1286,7 +1272,7 @@ defmodule Teiserver.Coordinator.ConsulServer do
     |> Enum.count()
   end
 
-  @spec get_user(String.t() | integer(), Map.t()) :: integer() | nil
+  @spec get_user(String.t() | integer(), map()) :: integer() | nil
   def get_user(id, _) when is_integer(id), do: id
   def get_user("", _), do: nil
   def get_user("#" <> id, _), do: int_parse(id)
@@ -1318,13 +1304,13 @@ defmodule Teiserver.Coordinator.ConsulServer do
     end
   end
 
-  # @spec say_message(T.userid(), String.t(), Map.t()) :: Map.t()
+  # @spec say_message(T.userid(), String.t(), map()) :: map()
   # def say_message(senderid, msg, state) do
   #   Lobby.say(senderid, msg, state.lobby_id)
   #   state
   # end
 
-  @spec say_command(Map.t(), Map.t()) :: Map.t()
+  @spec say_command(map(), map()) :: map()
   def say_command(cmd = %{silent: true}, state), do: log_command(cmd, state)
 
   def say_command(cmd, state) do
@@ -1334,7 +1320,7 @@ defmodule Teiserver.Coordinator.ConsulServer do
   end
 
   # Allows us to log the command even if it was silent
-  @spec log_command(Map.t(), Map.t()) :: Map.t()
+  @spec log_command(map(), map()) :: map()
   def log_command(cmd, state) do
     message = "$ " <> command_as_message(cmd)
     sender = CacheUser.get_user_by_id(cmd.senderid)
@@ -1342,7 +1328,7 @@ defmodule Teiserver.Coordinator.ConsulServer do
     state
   end
 
-  @spec command_as_message(Map.t()) :: String.t()
+  @spec command_as_message(map()) :: String.t()
   def command_as_message(cmd) do
     remaining = if Map.get(cmd, :remaining), do: " #{cmd.remaining}", else: ""
     error = if Map.get(cmd, :error), do: " Error: #{cmd.error}", else: ""
@@ -1403,7 +1389,7 @@ defmodule Teiserver.Coordinator.ConsulServer do
       unready_can_play: false,
       last_queue_state: [],
       balance_result: nil,
-      balance_algorithm: @default_balance_algorithm,
+      balance_algorithm: BalanceLib.get_default_algorithm(),
       player_limit: Config.get_site_config_cache("teiserver.Default player limit"),
       showmatch: true
     }
@@ -1441,7 +1427,7 @@ defmodule Teiserver.Coordinator.ConsulServer do
   end
 
   @impl true
-  @spec init(Map.t()) :: {:ok, Map.t()}
+  @spec init(map()) :: {:ok, map()}
   def init(opts) do
     lobby_id = opts[:lobby_id]
 

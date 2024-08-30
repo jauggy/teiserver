@@ -12,6 +12,8 @@ defmodule Teiserver.CacheUser do
   require Logger
   alias Phoenix.PubSub
 
+  @type t :: T.user()
+
   @timer_sleep 500
 
   @default_colour "#666666"
@@ -576,8 +578,8 @@ defmodule Teiserver.CacheUser do
   @spec add_user(T.user()) :: T.user()
   defdelegate add_user(user), to: UserCacheLib
 
-  @spec update_user(T.user(), boolean) :: T.user()
-  defdelegate update_user(user, persist \\ false), to: UserCacheLib
+  @spec update_user(T.user(), [persist: boolean()] | nil) :: T.user()
+  defdelegate update_user(user, persist \\ []), to: UserCacheLib
 
   @spec decache_user(T.userid()) :: :ok | :no_user
   defdelegate decache_user(userid), to: UserCacheLib
@@ -780,7 +782,7 @@ defmodule Teiserver.CacheUser do
     login_count = Teiserver.cache_get(:teiserver_login_count, userid) || 0
     rate_limit = Config.get_site_config_cache("system.Login limit count")
 
-    if login_count > rate_limit do
+    if login_count >= rate_limit do
       :block
     else
       Teiserver.cache_put(:teiserver_login_count, userid, login_count + 1)
@@ -868,18 +870,12 @@ defmodule Teiserver.CacheUser do
 
             {:error, "Unverified", user.id}
 
-          Client.get_client_by_id(user.id) != nil ->
-            Client.disconnect(user.id, "Already logged in")
-
-            if is_bot?(user) do
+          true ->
+            if Client.get_client_by_id(user.id) != nil do
+              Client.disconnect(user.id, "Already logged in")
               :timer.sleep(1000)
-              do_login(user, ip, lobby, lobby_hash)
-            else
-              Teiserver.cache_put(:teiserver_login_count, user.id, 10)
-              {:error, "Existing session, please retry in 20 seconds to clear the cache"}
             end
 
-          true ->
             # Okay, we're good, what's capacity looking like?
             cond do
               is_bot?(user) ->
@@ -973,18 +969,12 @@ defmodule Teiserver.CacheUser do
 
             {:error, "Unverified", user.id}
 
-          Client.get_client_by_id(user.id) != nil ->
-            Client.disconnect(user.id, "Already logged in")
-
-            if is_bot?(user) do
+          true ->
+            if Client.get_client_by_id(user.id) != nil do
+              Client.disconnect(user.id, "Already logged in")
               :timer.sleep(1000)
-              do_login(user, ip, lobby, lobby_hash)
-            else
-              Teiserver.cache_put(:teiserver_login_count, user.id, 10)
-              {:error, "Existing session, please retry in 20 seconds to clear the cache"}
             end
 
-          true ->
             # Okay, we're good, what's capacity looking like?
             cond do
               is_bot?(user) ->
@@ -1004,6 +994,56 @@ defmodule Teiserver.CacheUser do
                 do_login(user, ip, lobby, lobby_hash)
             end
         end
+    end
+  end
+
+  @spec tachyon_login(T.user(), String.t(), String.t()) ::
+          {:ok, T.user()} | {:error, String.t()} | {:error, :rate_limited, String.t()}
+  def tachyon_login(user, ip, lobby_client) do
+    lobby_hash = "tachyon_lobby_hash(maybe_useless)"
+
+    user = convert_user(user)
+
+    cond do
+      user.smurf_of_id != nil ->
+        Telemetry.log_complex_server_event(user.id, "Banned login", %{
+          error: "Smurf"
+        })
+
+        {:error, @smurf_string}
+
+      login_flood_check(user.id) == :block ->
+        {:error, :rate_limited, "Flood protection - Please wait 20 seconds and try again"}
+
+      is_restricted?(user, ["Permanently banned"]) ->
+        Telemetry.log_complex_server_event(user.id, "Banned login", %{
+          error: "Permanently banned"
+        })
+
+        {:error, "Banned account"}
+
+      is_restricted?(user, ["Login"]) ->
+        Telemetry.log_complex_server_event(user.id, "Banned login", %{
+          error: "Suspended"
+        })
+
+        {:error, @suspended_string}
+
+      not is_verified?(user) ->
+        # Log them in to save some details we'd not otherwise get
+        do_login(user, ip, lobby_client, lobby_hash)
+
+        Account.update_user_stat(user.id, %{
+          lobby_client: lobby_client,
+          lobby_hash: lobby_hash,
+          last_ip: ip
+        })
+
+        {:error, "Account is not verified"}
+
+      true ->
+        # TODO: copy/paste the capacity restriction and queuing from try_md5_login later
+        do_login(user, ip, lobby_client, lobby_hash)
     end
   end
 
@@ -1119,7 +1159,7 @@ defmodule Teiserver.CacheUser do
     update_user(%{user | restrictions: new_restrictions}, persist: true)
   end
 
-  @spec is_restricted?(T.userid() | T.user(), String.t()) :: boolean()
+  @spec is_restricted?(T.userid() | T.user(), String.t() | [String.t()]) :: boolean()
   def is_restricted?(nil, _), do: true
 
   def is_restricted?(userid, restriction) when is_integer(userid),

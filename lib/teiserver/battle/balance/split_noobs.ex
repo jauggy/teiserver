@@ -319,11 +319,7 @@ defmodule Teiserver.Battle.Balance.SplitNoobs do
           id: id,
           uncertainty: uncertainty,
           rank: rank,
-          in_party?:
-            cond do
-              count <= 1 -> false
-              true -> true
-            end
+          in_party?: count > 1
         }
   end
 
@@ -372,6 +368,6 @@ defmodule Teiserver.Battle.Balance.SplitNoobs do
   end
 
   def is_newish_player?(rank, uncertainty) do
-    rank <= 2 && uncertainty >= @high_uncertainty
+    uncertainty >= @high_uncertainty && rank <= 2
   end
 end

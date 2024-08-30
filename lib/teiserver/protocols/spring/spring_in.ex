@@ -36,7 +36,7 @@ defmodule Teiserver.Protocols.SpringIn do
 
   @action_commands ~w(SAY SAYEX SAYPRIVATE SAYBATTLE SAYBATTLEPRIVATEEX JOINBATTLE LEAVEBATTLE)
 
-  @spec data_in(String.t(), Map.t()) :: Map.t()
+  @spec data_in(String.t(), map()) :: map()
   def data_in(data, state) do
     if Application.get_env(:teiserver, Teiserver)[:extra_logging] == true or
          state.print_client_messages do
@@ -1335,18 +1335,18 @@ defmodule Teiserver.Protocols.SpringIn do
   # extended to accept originator as a second argument (only allowed when sent by bots)
   # this allows spads to inform clients who originally rang them with spads-command !ring
   defp do_handle("RING", data, _msg_id, state) do
-    userid = CacheUser.get_userid(data)
-
     case String.split(data) do
-      [_, originator] ->
+      [sender, originator] ->
+        userid = CacheUser.get_userid(sender)
         client = Client.get_client_by_id(state.userid)
 
-        if client != nil and not CacheUser.is_bot?(state.userid) do
+        if client != nil and CacheUser.is_bot?(state.userid) do
           originator_id = CacheUser.get_userid(originator)
           CacheUser.ring(userid, originator_id)
         end
 
       _ ->
+        userid = CacheUser.get_userid(data)
         CacheUser.ring(userid, state.userid)
     end
 
@@ -1358,7 +1358,7 @@ defmodule Teiserver.Protocols.SpringIn do
     _no_match(state, cmd, msg_id, data)
   end
 
-  @spec _no_match(Map.t(), String.t(), String.t() | nil, Map.t()) :: Map.t()
+  @spec _no_match(map(), String.t(), String.t() | nil, String.t()) :: map()
   def _no_match(state, cmd, msg_id, data) do
     data =
       data

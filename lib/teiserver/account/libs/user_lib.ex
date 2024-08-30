@@ -16,7 +16,7 @@ defmodule Teiserver.Account.UserLib do
   @spec colour :: atom
   def colour, do: :success
 
-  @spec make_favourite(Teiserver.Account.User.t()) :: Map.t()
+  @spec make_favourite(Teiserver.Account.User.t()) :: map()
   def make_favourite(user) do
     %{
       type_colour: StylingHelper.colours(colours()) |> elem(0),
@@ -89,6 +89,12 @@ defmodule Teiserver.Account.UserLib do
   def get_user(user_id, args \\ []) do
     (args ++ [id: user_id])
     |> UserQueries.query_users()
+    |> Repo.one()
+  end
+
+  @spec query_user(list) :: User.t() | nil
+  def query_user(query_args \\ []) do
+    UserQueries.query_users(query_args)
     |> Repo.one()
   end
 
