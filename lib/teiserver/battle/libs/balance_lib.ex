@@ -403,8 +403,8 @@ defmodule Teiserver.Battle.BalanceLib do
           end)
 
         names =
-          group.members
-          |> Enum.map_join(", ", fn userid -> Account.get_username_by_id(userid) || userid end)
+          group.names
+          |> Enum.join(", ")
 
         pairing_logs = [
           "Unable to find a player match for group of #{names} (stats: #{Enum.sum(group.ratings) |> round(2)}, #{group_mean |> round(2)}, #{group_stddev |> round(2)}), treating them as solo players"
@@ -868,12 +868,14 @@ defmodule Teiserver.Battle.BalanceLib do
 
         # Now turn a list of groups into one group
         selected_group
-        |> Enum.reduce(%{members: [], ratings: [], count: 0, group_rating: 0}, fn solo, acc ->
+        |> Enum.reduce(%{members: [], ratings: [], count: 0, group_rating: 0, names: []}, fn solo,
+                                                                                             acc ->
           %{
             members: acc.members ++ solo.members,
             ratings: acc.ratings ++ solo.ratings,
             count: acc.count + solo.count,
-            group_rating: acc.group_rating + solo.group_rating
+            group_rating: acc.group_rating + solo.group_rating,
+            names: acc.names ++ solo.names
           }
         end)
     end
